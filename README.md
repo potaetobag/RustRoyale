@@ -1,4 +1,4 @@
-![](https://potaetobag.live/imgs/potaetobag-rustroyale-1080p.jpg)
+![](https://potaetobag.live/imgs/potaetobag-rustroyale-1080p.jpg = 250x)
 
 RustRoyale is a custom tournament plugin for Rust, ideal for players with limited time or those in different timezones. It enables competitive gameplay with a point-based system, allowing asynchronous participation. Features include automated scheduling, score tracking, and Discord integration for updates.
 # Key Features:
