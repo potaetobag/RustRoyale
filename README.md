@@ -2,20 +2,20 @@ RustRoyale is a custom tournament plugin for Rust, ideal for players with limite
 # Key Features:
 ## Dynamic Scoring System:
 
-* Players earn 3 points for eliminating other players. (**KILL**)
-* Players lose 3 points when killed by other players. (**DEAD**)
-* Deaths due to NPCs, traps, or self-inflicted damage deduct 1 point. (**JOKE**)
-* Killing NPCs (e.g., Murderers, Zombies, Scientists, Scarecrows) awards 1 point. (**NPC**)
-* Destroying large entities like Helicopters or Bradley Tanks grants 5 points. (**ENT**)
+* Players earn 3 points for eliminating other players. (KILL)
+* Players lose 3 points when killed by other players. (DEAD)
+* Deaths due to NPCs, traps, or self-inflicted damage deduct 1 point. (JOKE)
+* Killing NPCs (e.g., Murderers, Zombies, Scientists, Scarecrows) awards 1 point. (NPC)
+* Destroying large entities like Helicopters or Bradley Tanks grants 5 points. (ENT)
 
 ## Notifications and Updates:
 
 * Sends updates to the global Rust chat and Discord, ensuring participants and spectators are informed about significant events like kills, deaths, and score changes.
 * Displays the tournament time remaining and scores on demand via chat commands.
 
-![Screenshot of in-game notifications on Global Chat](https://potaetobag.live/imgs/potaetobag-rustroyale-ingame.png)
+![](https://potaetobag.live/imgs/potaetobag-rustroyale-ingame.png)
 
-![Screenshot of notifications sent from Rust to the Discord channel](https://potaetobag.live/imgs/potaetobag-rustroyale-discord.png)
+![](https://potaetobag.live/imgs/potaetobag-rustroyale-discord.png)
 
 ## Automation and Safety Features:
 
@@ -43,10 +43,10 @@ RustRoyale is a custom tournament plugin for Rust, ideal for players with limite
 
 ## Command Suite:
 
-* `/start_tournament` – Manually start a tournament.
-* `/end_tournament` – End an ongoing tournament and announce winners.
-* `/time_tournament` – Check the remaining time in the tournament.
-* `/score_tournament` – Display the current scores of all players.
+* /start_tournament – Manually start a tournament.
+* /end_tournament – End an ongoing tournament and announce winners.
+* /time_tournament – Check the remaining time in the tournament.
+* /score_tournament – Display the current scores of all players.
 
 ## Permissions:
 ```
@@ -55,9 +55,9 @@ oxide.revoke user SteamID rustroyale.admin
 ```
 
 ## What's Next?
-* Find, steal, or destroy the opponent's token to score points. This strategy is especially useful when there’s a large point difference. A quick find might save you from losing, but your opponent could have the best defense, putting you in an even worse position. (**DSS**)
-* Earn points for building structures that deceive your opponent and hide the token. This tactic can make your opponent waste time searching for the token, ultimately losing the tournament by failing to match your score. (**DISS******)
-* Penalties for camping outside designated safe zones include temporary server time-outs and a reduction or freeze of accumulated points. (**BAD**)
-* The player will be granted 3 points for a clan headshot done to an animal or NPC over a long distance (+150 meters). (**SHOT**)
+* Find, steal, or destroy the opponent's token to score points. This strategy is especially useful when there’s a large point difference. A quick find might save you from losing, but your opponent could have the best defense, putting you in an even worse position. (DSS)
+* Earn points for building structures that deceive your opponent and hide the token. This tactic can make your opponent waste time searching for the token, ultimately losing the tournament by failing to match your score. (DISS)
+* Penalties for camping outside designated safe zones include temporary server time-outs and a reduction or freeze of accumulated points. (BAD)
+* The player will be granted 3 points for a clean headshot done to an animal or NPC over a long distance ( 150 meters). (SHOT)
 
 RustRoyale fosters competitive and engaging gameplay, combining dynamic mechanics with a seamless interface for managing tournaments. It’s a must-have for server administrators looking to elevate player engagement and interaction.
