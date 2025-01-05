@@ -279,7 +279,7 @@ namespace Oxide.Plugins
             Notify($"{participant.Name} - {participant.Score}");
         }
 
-        Puts($"Tournament started with {participantsData.Count} participants.");
+        Notify($"Tournament has started! Duration: {Configuration.DurationHours} hours. Good luck to all participants!");
 
         }
 
@@ -325,8 +325,7 @@ namespace Oxide.Plugins
                 {
                     UpdatePlayerScore(attacker.userID, "NPC", "killing an NPC");
                     string npcKillMessage = $"{attacker.displayName} received 1 point for killing an NPC. Total score: {playerStats[attacker.userID].Score}";
-                    SendGlobalChatMessage(npcKillMessage);
-                    SendDiscordMessage(npcKillMessage);
+                    Notify(npcKillMessage);
                 }
                 return;
             }
@@ -338,8 +337,7 @@ namespace Oxide.Plugins
                 {
                     UpdatePlayerScore(attacker.userID, "ENT", "destroying a Helicopter or Bradley");
                     string entityKillMessage = $"{attacker.displayName} received 5 points for destroying a Helicopter or Bradley. Total score: {playerStats[attacker.userID].Score}";
-                    SendGlobalChatMessage(entityKillMessage);
-                    SendDiscordMessage(entityKillMessage);
+                    Notify(entityKillMessage);
                 }
                 return;
             }
@@ -351,8 +349,7 @@ namespace Oxide.Plugins
                 {
                     UpdatePlayerScore(victim.userID, "JOKE", "being killed by an NPC");
                     string npcDeathMessage = $"{victim.displayName} lost 1 point for being killed by an NPC. Total score: {playerStats[victim.userID].Score}";
-                    SendGlobalChatMessage(npcDeathMessage);
-                    SendDiscordMessage(npcDeathMessage);
+                    Notify(npcDeathMessage);
                 }
                 return;
             }
@@ -364,8 +361,7 @@ namespace Oxide.Plugins
                 {
                     UpdatePlayerScore(victim.userID, "JOKE", "self-inflicted death");
                     string selfInflictedMessage = $"{victim.displayName} lost 1 point for self-inflicted death. Total score: {playerStats[victim.userID].Score}";
-                    SendGlobalChatMessage(selfInflictedMessage);
-                    SendDiscordMessage(selfInflictedMessage);
+                    Notify(selfInflictedMessage);
                 }
                 return;
             }
@@ -375,13 +371,11 @@ namespace Oxide.Plugins
             {
                 UpdatePlayerScore(victim.userID, "DEAD", $"being killed by {attacker.displayName}");
                 string victimDeathMessage = $"{victim.displayName} lost 3 points for being killed by {attacker.displayName}. Total score: {playerStats[victim.userID].Score}";
-                SendGlobalChatMessage(victimDeathMessage);
-                SendDiscordMessage(victimDeathMessage);
+                Notify(victimDeathMessage);
 
                 UpdatePlayerScore(attacker.userID, "KILL", $"killing {victim.displayName}");
                 string attackerKillMessage = $"{attacker.displayName} received 3 points for killing {victim.displayName}. Total score: {playerStats[attacker.userID].Score}";
-                SendGlobalChatMessage(attackerKillMessage);
-                SendDiscordMessage(attackerKillMessage);
+                Notify(attackerKillMessage);
             }
         }
 
