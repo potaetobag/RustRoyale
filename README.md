@@ -30,6 +30,7 @@ RustRoyale is a custom tournament plugin for Rust, ideal for players with limite
   "ChatUsername": "[RustRoyale]",
   "AutoStartEnabled": true,
   "StartDay": "Friday",
+  "StartHour": 14,
   "DurationHours": 72,
   "ScoreRules": {
     "KILL": 3,
@@ -43,10 +44,15 @@ RustRoyale is a custom tournament plugin for Rust, ideal for players with limite
 
 ## Command Suite:
 
-* /start_tournament – Manually start a tournament.
-* /end_tournament – End an ongoing tournament and announce winners.
-* /time_tournament – Check the remaining time in the tournament.
-* /score_tournament – Display the current scores of all players.
+* `/start_tournament` – Manually start a tournament.
+* `/end_tournament` – End an ongoing tournament and announce winners.
+* `/time_tournament` – Check the remaining time in the tournament.
+* `/score_tournament` – Display the current scores of all players.
+* `/enter_tournament` – Allows players to join the tournament.
+* `/exit_tournament` – Allows players to leave the tournament.
+* `/open_tournament` – Allows players to leave the tournament.
+* `/close_tournament` – Opt-out from automatic participation in future tournaments.
+* `/status_tournament` – Displays the tournament's current status or countdown to the next tournament.
 
 ## Permissions:
 ```
