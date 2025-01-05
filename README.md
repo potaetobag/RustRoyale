@@ -32,6 +32,7 @@ RustRoyale is a custom tournament plugin for Rust, ideal for players with limite
   "StartDay": "Friday",
   "StartHour": 14,
   "DurationHours": 72,
+  "DataRetentionDays": 30,
   "ScoreRules": {
     "KILL": 3,
     "DEAD": -3,
