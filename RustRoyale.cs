@@ -6,10 +6,11 @@ using Oxide.Core.Libraries;
 using UnityEngine;
 using System.Linq;
 using Newtonsoft.Json;
+using System.Collections.Concurrent;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.0.2"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.0.3"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
         #region Configuration
@@ -18,13 +19,15 @@ namespace Oxide.Plugins
         private class ConfigData
         {
             public string DiscordWebhookUrl { get; set; } = "";
-            public string ChatIconSteamId { get; set; } = "76561198332731279";
+            public string ChatIconSteamId { get; set; } = "76561199815164411";
             public string ChatUsername { get; set; } = "[RustRoyale]";
             public bool AutoStartEnabled { get; set; } = true;
             public string StartDay { get; set; } = "Friday";
             public int StartHour { get; set; } = 14;
             public int DurationHours { get; set; } = 72;
             public int DataRetentionDays { get; set; } = 30; // Default to 30 days
+            public int TopPlayersToTrack { get; set; } = 3; // Default to Top 3 players
+            public List<int> NotificationIntervals { get; set; } = new List<int> { 600, 60 }; // Default: every 10 minutes (600 seconds) and last minute (60 seconds)
             public Dictionary<string, int> ScoreRules { get; set; } = new Dictionary<string, int>
             {
                 {"KILL", 3},     // Human player kills another human player
@@ -32,6 +35,23 @@ namespace Oxide.Plugins
                 {"JOKE", -1},    // Death by traps, NPCs, self-inflicted damage
                 {"NPC", 1},      // Kill an NPC (Murderer, Zombie, Scientist, Scarecrow)
                 {"ENT", 5}       // Kill a Helicopter or Bradley Tank
+            };
+            public Dictionary<string, string> MessageTemplates { get; set; } = new Dictionary<string, string>
+            {
+                {"StartTournament", "The tournament has started! Good luck to all participants! Time left: {TimeRemaining}."},
+                {"EndTournament", "The tournament has ended! Congratulations to the top players!"},
+                {"PlayerScoreUpdate", "{PlayerName} earned {Score} point{PluralS} for {Action}."},
+                {"TopPlayers", "Top {Count} players: {PlayerList}."},
+                {"TimeRemaining", "Time remaining in the tournament: {Time}."},
+                {"JoinTournament", "{PlayerName} has joined the tournament!"},
+                {"LeaveTournament", "{PlayerName} has left the tournament."},
+                {"KillNPC", "{PlayerName} earned {Score} point{PluralS} for killing an NPC! Total score: {TotalScore}."},
+                {"KillEntity", "{PlayerName} earned {Score} point{PluralS} for destroying a {EntityType}! Total score: {TotalScore}."},
+                {"KillPlayer", "{PlayerName} earned {Score} point{PluralS} for killing {VictimName}! Total score: {TotalScore}."},
+                {"SelfInflictedDeath", "{PlayerName} lost {Score} point{PluralS} for a self-inflicted death. Total score: {TotalScore}."},
+                {"DeathByNPC", "{PlayerName} lost {Score} point{PluralS} for being killed by an NPC. Total score: {TotalScore}."},
+                {"NoTournamentRunning", "No tournament is currently running."},
+                {"ParticipantsAndScores", "Participants and Scores (Page {Page}/{TotalPages}): {PlayerList}."}
             };
         }
 
@@ -77,18 +97,40 @@ namespace Oxide.Plugins
             }
 
             if (Configuration.DataRetentionDays <= 0)
-                {
-                    PrintWarning("Invalid DataRetentionDays in configuration. Defaulting to 30 days.");
-                    Configuration.DataRetentionDays = 30;
-                    updated = true;
-                }
+            {
+                PrintWarning("Invalid DataRetentionDays in configuration. Defaulting to 30 days.");
+                Configuration.DataRetentionDays = 30;
+                updated = true;
+            }
+
+            if (Configuration.TopPlayersToTrack <= 0)
+            {
+                PrintWarning("Invalid TopPlayersToTrack in configuration. Defaulting to 3.");
+                Configuration.TopPlayersToTrack = 3;
+                updated = true;
+            }
+
+            // Validate NotificationIntervals
+            if (Configuration.NotificationIntervals == null || !Configuration.NotificationIntervals.Any())
+            {
+                PrintWarning("NotificationIntervals is invalid or missing. Defaulting to every 10 minutes and the last minute.");
+                Configuration.NotificationIntervals = new List<int> { 600, 60 }; // Default intervals
+                updated = true;
+            }
+
+            if (Configuration.NotificationIntervals.Any(interval => interval <= 0))
+            {
+                PrintWarning("NotificationIntervals contains invalid values. Removing non-positive intervals.");
+                Configuration.NotificationIntervals = Configuration.NotificationIntervals.Where(interval => interval > 0).ToList();
+                updated = true;
+            }
 
             if (updated)
             {
                 SaveConfig(); // Save validated changes to the configuration file
             }
         }
-     
+
         #endregion
 
         #region Permissions
@@ -111,7 +153,7 @@ namespace Oxide.Plugins
             if (!Directory.Exists(DataDirectory))
             {
                 Directory.CreateDirectory(DataDirectory);
-                Puts($"Created data directory: {DataDirectory}");
+                LogMessage($"Created data directory: {DataDirectory}");
             }
         }
 
@@ -123,9 +165,9 @@ namespace Oxide.Plugins
                 File.AppendAllText(CurrentTournamentFile, $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff} - {message}\n");
             }
             catch (Exception ex)
-            {
-                PrintError($"Failed to log event: {ex.Message}");
-            }
+        {
+            PrintError($"Unexpected error: {ex.Message}\n{ex.StackTrace}");
+        }
         }
 
         private void ManageOldTournamentFiles()
@@ -181,6 +223,38 @@ namespace Oxide.Plugins
             return isTournamentRunning && DateTime.UtcNow < tournamentStartTime.AddHours(6);
         }
 
+        private void ScheduleCountdown(DateTime targetTime, Action onCompletion)
+        {
+            TimeSpan timeUntilTarget = targetTime - DateTime.UtcNow;
+
+            if (timeUntilTarget.TotalSeconds <= 0)
+            {
+                onCompletion?.Invoke();
+                return;
+            }
+
+            if (countdownTimer != null)
+            {
+                countdownTimer.Destroy();
+                countdownTimer = null;
+            }
+
+            countdownTimer = timer.Repeat(1f, (int)timeUntilTarget.TotalSeconds, () =>
+            {
+                TimeSpan remainingTime = targetTime - DateTime.UtcNow;
+
+                if (remainingTime.TotalSeconds <= 0)
+                {
+                    countdownTimer?.Destroy();
+                    countdownTimer = null;
+                    onCompletion?.Invoke();
+                    return;
+                }
+
+                NotifyTournamentCountdown(remainingTime);
+            });
+        }
+
         private void ScheduleTournament()
         {
             if (!Configuration.AutoStartEnabled)
@@ -195,21 +269,19 @@ namespace Oxide.Plugins
                 int startHour = Configuration.StartHour;
 
                 DateTime now = DateTime.UtcNow;
-                DateTime nextStartDay = now.AddDays((7 + (int)startDay - (int)now.DayOfWeek) % 7).Date;
-                tournamentStartTime = nextStartDay.AddHours(startHour);
+                DateTime nextStartDay = now.AddDays((7 + (int)startDay - (int)now.DayOfWeek) % 7).Date.AddHours(startHour);
 
-                if (tournamentStartTime <= now)
+                if (nextStartDay <= now)
                 {
-                    tournamentStartTime = tournamentStartTime.AddDays(7);
+                    nextStartDay = nextStartDay.AddDays(7); // Move to the next week
                 }
 
-                double secondsToStart = (tournamentStartTime - now).TotalSeconds;
+                tournamentStartTime = nextStartDay;
 
-                Puts($"Tournament scheduled to start on {tournamentStartTime:yyyy-MM-dd HH:mm:ss} (in {secondsToStart / 3600:F2} hours).");
+                LogMessage($"Tournament scheduled to start on {tournamentStartTime:yyyy-MM-dd HH:mm:ss} UTC.");
 
-                ScheduleDailyCountdown(tournamentStartTime);
-
-                timer.Once((float)secondsToStart, StartTournament);
+                // Use the consolidated countdown logic
+                ScheduleCountdown(tournamentStartTime, StartTournament);
             }
             catch (Exception ex)
             {
@@ -217,7 +289,7 @@ namespace Oxide.Plugins
             }
         }
 
-        private void ScheduleDailyCountdown(DateTime tournamentStartTime)
+        private void ScheduleDailyCountdown()
         {
             DateTime now = DateTime.UtcNow;
             DateTime dailyNotificationTime = now.Date.AddHours(Configuration.StartHour);
@@ -227,81 +299,122 @@ namespace Oxide.Plugins
                 dailyNotificationTime = dailyNotificationTime.AddDays(1);
             }
 
-            double secondsToFirstNotification = (dailyNotificationTime - now).TotalSeconds;
-
-            countdownTimer = timer.Once((float)secondsToFirstNotification, () =>
-            {
-                NotifyTournamentCountdown(tournamentStartTime);
-
-                countdownTimer = timer.Every(86400f, () =>
-                {
-                    if (!isTournamentRunning)
-                    {
-                        NotifyTournamentCountdown(tournamentStartTime);
-                    }
-                    else
-                    {
-                        timer.Destroy(ref countdownTimer);
-                    }
-                });
-            });
-
             Puts($"Daily countdown notifications scheduled to start at {dailyNotificationTime:yyyy-MM-dd HH:mm:ss} UTC.");
+
+            ScheduleCountdown(dailyNotificationTime, () =>
+            {
+                NotifyTournamentCountdown(dailyNotificationTime - DateTime.UtcNow);
+                ScheduleDailyCountdown(); // Reschedule the daily countdown for the next day
+            });
         }
 
-        private void NotifyTournamentCountdown(DateTime tournamentStartTime)
+        private int lastNotifiedMinutes = -1;
+
+        private void NotifyTournamentCountdown(TimeSpan remainingTime)
         {
-            DateTime now = DateTime.UtcNow;
-            double daysToStart = (tournamentStartTime - now).TotalDays;
+            int currentSeconds = (int)remainingTime.TotalSeconds;
 
-            if (daysToStart < 1) return;
+            if (Configuration.NotificationIntervals.Contains(currentSeconds) && lastNotifiedMinutes != currentSeconds)
+            {
+                lastNotifiedMinutes = currentSeconds;
 
-            string message = $"The tournament will start in {Math.Ceiling(daysToStart)} day(s)!";
-            Notify(message);
+                Notify("TimeRemaining", null, placeholders: new Dictionary<string, string>
+                {
+                    {"Time", FormatTimeRemaining(remainingTime)}
+                });
+            }
+        }
+
+        private bool ShouldSendNotification(TimeSpan remainingTime)
+        {
+            // Notify every 10 minutes or in the last minute
+            return remainingTime.TotalMinutes % 10 == 0 || remainingTime.TotalSeconds <= 60;
         }
 
         private void StartTournament()
         {
-            if (isTournamentRunning)
+            try
             {
-                Notify("A tournament is already running!");
-                return;
+                if (isTournamentRunning)
+                {
+                    Notify("StartTournament", null);
+                    return;
+                }
+
+                if (Configuration.DurationHours <= 0)
+                {
+                    PrintError("Invalid tournament duration. Ensure `DurationHours` is greater than 0.");
+                    return;
+                }
+
+                Puts("RustRoyale: Tournament started!");
+                isTournamentRunning = true;
+                tournamentEndTime = DateTime.UtcNow.AddHours(Configuration.DurationHours);
+
+                playerStats.Clear();
+                foreach (var participant in participantsData.Values)
+                {
+                    participant.Score = 0;
+                }
+
+                if (countdownTimer != null)
+                {
+                    countdownTimer.Destroy();
+                    countdownTimer = null;
+                }
+
+                Notify("StartTournament", null, placeholders: new Dictionary<string, string>
+                {
+                    {"TimeRemaining", FormatTimeRemaining(tournamentEndTime - DateTime.UtcNow)},
+                    {"Duration", Configuration.DurationHours.ToString()}
+                });
+
+                LogEvent("Tournament started successfully.");
             }
-
-            Puts("RustRoyale: Tournament started!");
-            isTournamentRunning = true;
-            tournamentEndTime = DateTime.UtcNow.AddHours(Configuration.DurationHours);
-
-            playerStats.Clear();
-            foreach (var participant in participantsData.Values)
-        {
-            participant.Score = 0; // Reset scores for the new tournament
-            Notify($"{participant.Name} - {participant.Score}");
-        }
-
-        Notify($"Tournament has started! Duration: {Configuration.DurationHours} hours. Good luck to all participants!");
-
+            catch (Exception ex)
+            {
+                PrintError($"Failed to start tournament: {ex.Message}");
+            }
         }
 
         private void EndTournament()
         {
             if (!isTournamentRunning)
             {
-                Notify("No tournament is currently running to end!");
+                Notify("EndTournament", null);
                 return;
             }
 
             Puts("RustRoyale: Tournament ended!");
             isTournamentRunning = false;
 
-            Notify("Tournament has ended! Final Scores:");
-            foreach (var participant in participantsData.Values.OrderByDescending(p => p.Score))
+            var sortedParticipants = participantsData.Values.AsEnumerable()
+            .OrderByDescending(p => p.Score)
+            .Take(Configuration.TopPlayersToTrack)
+            .ToList();
+
+            foreach (var participant in sortedParticipants)
             {
-                Notify($"{participant.Name}: {participant.Score} Points");
+                Notify("PlayerScoreUpdate", null, score: participant.Score, action: "final score");
             }
 
-            AnnounceWinners();
-            Notify("Tournament has ended! Winners are being announced.");
+            Notify("EndTournament", null, action: "Final scores announced!");
+        }
+
+        private void OnPlayerInit(BasePlayer player)
+        {
+            if (player != null && !string.IsNullOrEmpty(player.displayName))
+            {
+                playerNameCache[player.userID] = player.displayName;
+            }
+        }
+
+        private void OnPlayerDisconnected(BasePlayer player)
+        {
+            if (player != null)
+            {
+                playerNameCache.TryRemove(player.userID, out _);
+            }
         }
 
         private void OnPlayerDeath(BasePlayer victim, HitInfo info)
@@ -319,108 +432,111 @@ namespace Oxide.Plugins
                                   victim.ShortPrefabName.Contains("bradley");
 
             // Player kills an NPC
-            if (isVictimNPC)
+            if (isVictimNPC && attacker != null && !attacker.IsNpc && participants.Contains(attacker.userID))
             {
-                if (attacker != null && !attacker.IsNpc && participants.Contains(attacker.userID))
-                {
-                    UpdatePlayerScore(attacker.userID, "NPC", "killing an NPC");
-                    string npcKillMessage = $"{attacker.displayName} received 1 point for killing an NPC. Total score: {playerStats[attacker.userID].Score}";
-                    Notify(npcKillMessage);
-                }
+                UpdatePlayerScore(attacker.userID, "NPC", "killing an NPC");
+                Notify("KillNPC", attacker, score: Configuration.ScoreRules["NPC"]);
                 return;
             }
 
             // Player destroys a Helicopter or Bradley
-            if (isVictimEntity)
+            if (isVictimEntity && attacker != null && !attacker.IsNpc && participants.Contains(attacker.userID))
             {
-                if (attacker != null && !attacker.IsNpc && participants.Contains(attacker.userID))
-                {
-                    UpdatePlayerScore(attacker.userID, "ENT", "destroying a Helicopter or Bradley");
-                    string entityKillMessage = $"{attacker.displayName} received 5 points for destroying a Helicopter or Bradley. Total score: {playerStats[attacker.userID].Score}";
-                    Notify(entityKillMessage);
-                }
+                UpdatePlayerScore(attacker.userID, "ENT", "destroying a Helicopter or Bradley");
+                Notify("KillEntity", attacker, score: Configuration.ScoreRules["ENT"], entityType: victim.ShortPrefabName);
                 return;
             }
 
             // Player is killed by an NPC
-            if (attacker == null || attacker.IsNpc)
+            if ((attacker == null || attacker.IsNpc) && participants.Contains(victim.userID))
             {
-                if (participants.Contains(victim.userID))
-                {
-                    UpdatePlayerScore(victim.userID, "JOKE", "being killed by an NPC");
-                    string npcDeathMessage = $"{victim.displayName} lost 1 point for being killed by an NPC. Total score: {playerStats[victim.userID].Score}";
-                    Notify(npcDeathMessage);
-                }
+                UpdatePlayerScore(victim.userID, "JOKE", "being killed by an NPC");
+                Notify("DeathByNPC", victim, score: Configuration.ScoreRules["JOKE"]);
                 return;
             }
 
             // Player kills themselves (self-inflicted)
-            if (attacker == victim)
+            if (attacker == victim && participants.Contains(victim.userID))
             {
-                if (participants.Contains(victim.userID))
-                {
-                    UpdatePlayerScore(victim.userID, "JOKE", "self-inflicted death");
-                    string selfInflictedMessage = $"{victim.displayName} lost 1 point for self-inflicted death. Total score: {playerStats[victim.userID].Score}";
-                    Notify(selfInflictedMessage);
-                }
+                UpdatePlayerScore(victim.userID, "JOKE", "self-inflicted death");
+                Notify("SelfInflictedDeath", victim, score: Configuration.ScoreRules["JOKE"]);
                 return;
             }
 
             // Player kills another player
-            if (participants.Contains(attacker.userID) && participants.Contains(victim.userID))
+            if (attacker != null && participants.Contains(attacker.userID) && participants.Contains(victim.userID))
             {
                 UpdatePlayerScore(victim.userID, "DEAD", $"being killed by {attacker.displayName}");
-                string victimDeathMessage = $"{victim.displayName} lost 3 points for being killed by {attacker.displayName}. Total score: {playerStats[victim.userID].Score}";
-                Notify(victimDeathMessage);
+                Notify("PlayerScoreUpdate", victim, score: Configuration.ScoreRules["DEAD"], action: $"being killed by {attacker.displayName}");
 
                 UpdatePlayerScore(attacker.userID, "KILL", $"killing {victim.displayName}");
-                string attackerKillMessage = $"{attacker.displayName} received 3 points for killing {victim.displayName}. Total score: {playerStats[attacker.userID].Score}";
-                Notify(attackerKillMessage);
+                Notify("KillPlayer", attacker, score: Configuration.ScoreRules["KILL"], victimName: victim.displayName);
             }
         }
 
         private void UpdatePlayerScore(ulong userId, string actionCode, string actionDescription)
         {
-            // Ensure the participant exists in the tournament
             if (!participantsData.TryGetValue(userId, out var participant))
             {
                 PrintWarning($"Player with UserID {userId} not found in participants.");
                 return;
             }
 
-            // Fetch the score adjustment from configuration
             if (!Configuration.ScoreRules.TryGetValue(actionCode, out int points))
             {
                 PrintWarning($"Invalid action code: {actionCode}. No score adjustment made.");
                 return;
             }
 
-            // Update the participant's score
             participant.Score += points;
-
-            // Save the updated participants data
             SaveParticipantsData();
 
-            // Log the score update
-            string logMessage = $"{participant.Name} received {points} point(s) for {actionDescription}. Total score: {participant.Score}.";
-            LogEvent(logMessage);
+            Notify("PlayerScoreUpdate", BasePlayer.FindByID(userId), score: points, action: actionDescription);
+            LogEvent($"{participant.Name} received {points} point(s) for {actionDescription}. Total score: {participant.Score}.");
+        }
 
-            // Notify the player of their updated score
-            var player = BasePlayer.FindByID(userId);
-            player?.ChatMessage(logMessage);
+        private void OnUnload()
+        {
+            // Ensure all timers are cleaned up
+            CleanupTimers();
+
+            // Handle any remaining saveDataTimer explicitly
+            if (saveDataTimer != null)
+            {
+                saveDataTimer.Destroy();
+                saveDataTimer = null;
+            }
+
+            // Perform the final save of participants data
+            SaveParticipantsData();
+        }
+
+        private void CleanupTimers()
+        {
+            if (saveDataTimer != null)
+            {
+                saveDataTimer.Destroy();
+                saveDataTimer = null;
+            }
+            if (countdownTimer != null)
+            {
+                countdownTimer.Destroy();
+                countdownTimer = null;
+            }
         }
 
         private string HistoryFile => $"{DataDirectory}/TournamentHistory.json";
 
-        private void SaveTournamentHistory()
+        private void SaveTournamentHistory(List<PlayerStats> topPlayers)
         {
             var completedTournament = new
             {
                 Date = DateTime.UtcNow,
-                Winners = participantsData.Values.OrderByDescending(p => p.Score).Take(3).Select(p => new { p.Name, p.Score }).ToList(),
-                Participants = participantsData
+                Winners = topPlayers.Select(p => new { p.Name, p.Score }).ToList(),
+                Participants = participantsData.Values.Select(p => new { p.Name, p.Score }).ToList()
             };
 
+            // Save to TournamentHistory.json
             var history = new List<object>();
             if (File.Exists(HistoryFile))
             {
@@ -428,18 +544,51 @@ namespace Oxide.Plugins
             }
             history.Add(completedTournament);
             File.WriteAllText(HistoryFile, JsonConvert.SerializeObject(history, Formatting.Indented));
+
+            // Save winners to a separate file
+            string winnersFile = $"{DataDirectory}/Winners_{DateTime.UtcNow:yyyyMMddHHmmss}.json";
+            File.WriteAllText(winnersFile, JsonConvert.SerializeObject(completedTournament.Winners, Formatting.Indented));
+
         }
+
+        private void LogMessage(string message, bool logToDiscord = false)
+        {
+            Puts(message);
+
+            if (logToDiscord && !string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
+            {
+                SendDiscordMessage(message);
+            }
+        }
+
+        private ConcurrentDictionary<ulong, string> playerNameCache = new ConcurrentDictionary<ulong, string>();
 
         private string GetPlayerName(ulong userId)
         {
-            if (BasePlayer.FindByID(userId) is BasePlayer player)
-                return player.displayName;
+            if (playerNameCache.TryGetValue(userId, out var cachedName))
+            {
+                return cachedName;
+            }
 
-            return participantsData.TryGetValue(userId, out var participant) ? participant.Name : "Unknown";
+            var player = BasePlayer.FindByID(userId);
+            if (player != null && !string.IsNullOrEmpty(player.displayName))
+            {
+                playerNameCache[userId] = player.displayName;
+                return player.displayName;
+            }
+
+            if (participantsData.TryGetValue(userId, out var participant) && !string.IsNullOrEmpty(participant.Name))
+            {
+                playerNameCache[userId] = participant.Name;
+                return participant.Name;
+            }
+
+            return "Unknown";
         }
 
         private string ParticipantsFile => $"{DataDirectory}/Participants.json";
-        private Dictionary<ulong, PlayerStats> participantsData = new Dictionary<ulong, PlayerStats>();
+        
+        private ConcurrentDictionary<ulong, PlayerStats> participantsData = new ConcurrentDictionary<ulong, PlayerStats>();
 
         private void LoadParticipantsData()
         {
@@ -448,34 +597,93 @@ namespace Oxide.Plugins
                 EnsureDataDirectory(); // Ensure the directory exists
                 if (File.Exists(ParticipantsFile))
                 {
-                    participantsData = JsonConvert.DeserializeObject<Dictionary<ulong, PlayerStats>>(File.ReadAllText(ParticipantsFile))
-                               ?? new Dictionary<ulong, PlayerStats>();
+                    participantsData = new ConcurrentDictionary<ulong, PlayerStats>(
+                        JsonConvert.DeserializeObject<Dictionary<ulong, PlayerStats>>(File.ReadAllText(ParticipantsFile))
+                        ?? new Dictionary<ulong, PlayerStats>()
+                    );
+
+                    // Populate the cache only for valid participant names
+                    foreach (var participant in participantsData.Values)
+                    {
+                        if (!string.IsNullOrEmpty(participant.Name))
+                        {
+                            playerNameCache[participant.UserId] = participant.Name;
+                        }
+                    }
                 }
                 else
                 {
-                    participantsData = new Dictionary<ulong, PlayerStats>();
+                    participantsData = new ConcurrentDictionary<ulong, PlayerStats>();
+                    PrintWarning("Participants data file is missing or corrupt. Starting with an empty dataset.");
                     SaveParticipantsData(); // Create the initial file if it doesn't exist
                 }
             }
             catch (Exception ex)
             {
                 PrintWarning($"Failed to load participants data: {ex.Message}. Initializing with an empty dictionary.");
-                participantsData = new Dictionary<ulong, PlayerStats>();
+                participantsData = new ConcurrentDictionary<ulong, PlayerStats>();
                 SaveParticipantsData();
             }
         }
+
+        private Timer saveDataTimer;
+
+        // Call this during Init to start periodic saving
+        private void StartDataSaveTimer()
+        {
+            saveDataTimer = timer.Every(300f, SaveParticipantsData); // Save every 5 minutes
+        }
+
+        private readonly object participantsDataLock = new object();
 
         private void SaveParticipantsData()
         {
             try
             {
                 EnsureDataDirectory(); // Ensure the directory exists
-                File.WriteAllText(ParticipantsFile, JsonConvert.SerializeObject(participantsData, Formatting.Indented));
+                string serializedData;
+
+                lock (participantsDataLock) // Thread-safe access
+                {
+                    serializedData = SerializeParticipantsData(participantsData);
+                }
+
+                File.WriteAllText(ParticipantsFile, serializedData);
+            }
+            catch (IOException ioEx)
+            {
+                PrintError($"IO error while saving participants data: {ioEx.Message}");
+            }
+            catch (JsonException jsonEx)
+            {
+                PrintError($"Serialization error while saving participants data: {jsonEx.Message}");
             }
             catch (Exception ex)
             {
-                PrintError($"Failed to save participants data: {ex.Message}");
+                PrintError($"Unexpected error while saving participants data: {ex.Message}");
             }
+        }
+
+        private string SerializeParticipantsData(ConcurrentDictionary<ulong, PlayerStats> participants)
+        {
+            try
+            {
+                return JsonConvert.SerializeObject(participants.ToDictionary(kvp => kvp.Key, kvp => kvp.Value), Formatting.Indented);
+            }
+            catch (JsonException ex)
+            {
+                PrintError($"Error serializing participants data: {ex.Message}");
+                throw; // Re-throw to allow the caller to handle this
+            }
+        }
+
+        private string FormatTimeRemaining(TimeSpan timeSpan)
+        {
+            // Ensure no negative values in case time has elapsed
+            timeSpan = timeSpan < TimeSpan.Zero ? TimeSpan.Zero : timeSpan;
+
+            // Format as HH:MM:SS
+            return $"{timeSpan.Hours:D2}:{timeSpan.Minutes:D2}:{timeSpan.Seconds:D2}";
         }
 
         private bool ValidateAdminCommand(BasePlayer player, string actionName)
@@ -490,26 +698,144 @@ namespace Oxide.Plugins
 
         private void AnnounceWinners()
         {
-            Notify("Tournament Results:");
+            Notify("Tournament Results", null); // Pass `null` for the `player` argument
             var winners = participantsData.Values
                 .OrderByDescending(participant => participant.Score)
-                .Take(3)
+                .Take(Configuration.TopPlayersToTrack)
                 .ToList();
 
-            for (int i = 0; i < winners.Count; i++)
+            var playerList = string.Join(", ", winners.Select((p, i) => $"{i + 1}. {p.Name} ({p.Score} Points)"));
+
+            Notify("TopPlayers", null, 0, "announcing winners", "", "", new Dictionary<string, string>
             {
-                Notify($"{i + 1}. {winners[i].Name} - {winners[i].Score} Points");
+                {"Count", winners.Count.ToString()},
+                {"PlayerList", playerList}
+            });
+
+            LogMessage($"Announced winners: {string.Join(", ", winners.Select(w => w.Name))}");
+        }
+
+        private void Notify(string templateName, BasePlayer player, int score = 0, string action = "", string entityType = "", string victimName = "", Dictionary<string, string> placeholders = null)
+        {
+            if (!Configuration.MessageTemplates.TryGetValue(templateName, out var template))
+            {
+                PrintWarning($"Template '{templateName}' not found in configuration.");
+                return;
             }
 
-            Puts($"Announced winners: {string.Join(", ", winners.Select(w => w.Name))}");
+            placeholders ??= new Dictionary<string, string>
+            {
+                ["PlayerName"] = player?.displayName ?? "Unknown",
+                ["VictimName"] = victimName,
+                ["Score"] = Math.Abs(score).ToString(),
+                ["TotalScore"] = participantsData.TryGetValue(player?.userID ?? 0, out var participant) ? participant.Score.ToString() : "0",
+                ["EntityType"] = entityType,
+                ["Action"] = action,
+                ["PluralS"] = Math.Abs(score) == 1 ? "" : "s"
+            };
+
+            // Extract placeholders from the template
+            var templatePlaceholders = GetPlaceholdersFromTemplate(template);
+
+            // Validate that all placeholders in the template are provided
+            var missingPlaceholders = templatePlaceholders.Except(placeholders.Keys).ToList();
+            if (missingPlaceholders.Any())
+            {
+                PrintWarning($"Template '{templateName}' is missing placeholders: {string.Join(", ", missingPlaceholders)}.");
+                return;
+            }
+
+            // Replace placeholders in the template
+            foreach (var placeholder in placeholders)
+            {
+                if (!template.Contains($"{{{placeholder.Key}}}"))
+                {
+                    PrintWarning($"Placeholder '{placeholder.Key}' is not used in template '{templateName}'.");
+                }
+                template = template.Replace($"{{{placeholder.Key}}}", placeholder.Value);
+            }
+
+            SendTournamentMessage(template);
+            SendDiscordMessage(template);
+            Puts(template);
         }
 
-        private void Notify(string message)
+        private IEnumerable<string> GetPlaceholdersFromTemplate(string template)
         {
-            SendGlobalChatMessage(message);
-            SendDiscordMessage(message);
-            Puts(message);
+            var matches = System.Text.RegularExpressions.Regex.Matches(template, @"\{(\w+)\}");
+            return matches.Cast<System.Text.RegularExpressions.Match>().Select(m => m.Groups[1].Value);
         }
+
+        private string FormatMessage(string template, Dictionary<string, string> placeholders)
+        {
+            foreach (var placeholder in placeholders)
+            {
+                template = template.Replace($"{{{placeholder.Key}}}", placeholder.Value);
+            }
+            return template;
+        }
+
+        private void ValidateMessageTemplates()
+        {
+            var defaultTemplates = new Dictionary<string, string>
+            {
+                {"StartTournament", "The tournament has started! Good luck to all participants! Time left: {TimeRemaining}."},
+                {"EndTournament", "The tournament has ended! Congratulations to the top players!"},
+                {"PlayerScoreUpdate", "{PlayerName} earned {Score} point{PluralS} for {Action}."},
+                {"TopPlayers", "Top {Count} players: {PlayerList}."},
+                {"TimeRemaining", "Time remaining in the tournament: {Time}."}
+            };
+
+            var missingTemplates = new List<string>();
+            var missingPlaceholders = new Dictionary<string, List<string>>();
+
+            foreach (var templateKey in defaultTemplates.Keys)
+            {
+                if (!Configuration.MessageTemplates.TryGetValue(templateKey, out string message))
+                {
+                    missingTemplates.Add(templateKey);
+                    Configuration.MessageTemplates[templateKey] = defaultTemplates[templateKey];
+                    continue;
+                }
+
+                // Validate placeholders
+                var requiredPlaceholders = defaultTemplates[templateKey]
+                    .Split(new[] { '{', '}' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Where((s, i) => i % 2 == 1) // Get only placeholder names
+                    .ToList();
+
+                var placeholdersNotFound = requiredPlaceholders
+                    .Where(placeholder => !message.Contains($"{{{placeholder}}}"))
+                    .ToList();
+
+                if (placeholdersNotFound.Any())
+                {
+                    missingPlaceholders[templateKey] = placeholdersNotFound;
+                }
+            }
+
+            foreach (var missingTemplate in missingTemplates)
+            {
+                PrintWarning($"Template '{missingTemplate}' was missing and has been added with default.");
+            }
+
+            foreach (var missing in missingPlaceholders)
+            {
+                PrintWarning($"Template '{missing.Key}' is missing placeholders: {string.Join(", ", missing.Value)}");
+            }
+
+            if (!missingTemplates.Any() && !missingPlaceholders.Any())
+            {
+                Puts("All templates validated successfully.");
+            }
+            else
+            {
+                PrintWarning("Template validation completed with issues. Review the warnings.");
+            }
+
+            SaveConfig();
+        }
+
         #endregion
 
         private string GetTimeRemainingMessage()
@@ -518,59 +844,73 @@ namespace Oxide.Plugins
                 return "No tournament is currently running.";
 
             TimeSpan remainingTime = tournamentEndTime - DateTime.UtcNow;
-            return $"Time remaining in the tournament: {remainingTime:hh\\:mm\\:ss}";
+            string formattedTime = FormatTimeRemaining(remainingTime);
+            return $"Time remaining in the tournament: {formattedTime}";
         }
 
         private void DisplayTimeRemaining()
         {
             string message = GetTimeRemainingMessage();
-            Notify(message); // Notify handles both chat and Discord.
+            Notify("TimeRemaining", null, placeholders: new Dictionary<string, string>
+            {
+                {"Time", message}
+            });
         }
 
         private void DisplayScores()
         {
             if (participantsData.Count == 0)
             {
-                SendGlobalChatMessage("No scores to display. Tournament might not have started yet.");
+                Notify("NoScores", null);
                 return;
             }
 
-            SendGlobalChatMessage("Tournament Scores:");
-            foreach (var participant in participantsData.Values)
+            var scoreList = string.Join(", ", participantsData.Values
+                .OrderByDescending(p => p.Score)
+                .Select(p => $"{p.Name} ({p.Score} Points)"));
+
+            Notify("TournamentScores", null, action: "displaying scores", victimName: "", entityType: "", score: 0, placeholders: new Dictionary<string, string>
             {
-                SendGlobalChatMessage($"{participant.Name}: {participant.Score} Points");
-            }
+                {"PlayerList", scoreList}
+            });
         }
 
         #endregion
 
         #region Helpers
-        private void SendGlobalChatMessage(string message)
+        private void SendTournamentMessage(string message, HashSet<ulong> targetPlayers = null)
         {
             foreach (var player in BasePlayer.activePlayerList)
             {
-                player.SendConsoleCommand("chat.add", Configuration.ChatIconSteamId, Configuration.ChatUsername, message);
+                // Send to specific target players if provided, otherwise to all participants
+                if ((targetPlayers == null && participantsData.ContainsKey(player.userID)) || 
+                    (targetPlayers != null && targetPlayers.Contains(player.userID)))
+                {
+                    player.SendConsoleCommand("chat.add", Configuration.ChatIconSteamId, Configuration.ChatUsername, message);
+                }
             }
         }
 
         private void SendDiscordMessage(string content)
         {
-            if (string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
+            if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
             {
-                Puts("Discord webhook URL is not configured.");
-                return;
-            }
+                var payload = new Dictionary<string, string> { { "content", content } };
+                string jsonPayload = JsonConvert.SerializeObject(payload);
 
-            var payload = new Dictionary<string, string> { { "content", content } };
-            string jsonPayload = JsonConvert.SerializeObject(payload);
-
-            webrequest.Enqueue(Configuration.DiscordWebhookUrl, jsonPayload, (code, response) =>
-            {
-                if (code != 204)
+                webrequest.Enqueue(Configuration.DiscordWebhookUrl, jsonPayload, (code, response) =>
                 {
-                    PrintWarning($"Failed to send Discord message: {response}. HTTP Code: {code}");
-                }
-            }, this, RequestMethod.POST, new Dictionary<string, string> { { "Content-Type", "application/json" } });
+                    if (code != 204)
+                    {
+                        PrintWarning($"Failed to send Discord message: {response}. HTTP Code: {code}");
+                        LogMessage($"Discord notification failed: {content}");
+                    }
+                }, this, RequestMethod.POST, new Dictionary<string, string> { { "Content-Type", "application/json" } });
+            }
+            else
+            {
+                LogMessage($"Discord notification skipped (not configured): {content}");
+            }
         }
 
         #endregion
@@ -627,10 +967,10 @@ namespace Oxide.Plugins
                 return;
             }
 
-            if (!participantsData.ContainsKey(player.userID))
+            if (participantsData.TryAdd(player.userID, new PlayerStats(player.userID)))
             {
-                participantsData[player.userID] = new PlayerStats(player.userID);
                 SaveParticipantsData();
+                LogEvent($"{player.displayName} joined the tournament.");
                 player.ChatMessage("You have successfully joined the tournament!");
             }
             else
@@ -642,7 +982,7 @@ namespace Oxide.Plugins
         [ChatCommand("exit_tournament")]
         private void ExitTournamentCommand(BasePlayer player, string command, string[] args)
         {
-            if (participantsData.Remove(player.userID))
+            if (participantsData.TryRemove(player.userID, out _))
             {
                 SaveParticipantsData();
                 player.ChatMessage("You have successfully left the tournament.");
@@ -687,39 +1027,44 @@ namespace Oxide.Plugins
         [ChatCommand("status_tournament")]
         private void StatusTournamentCommand(BasePlayer player, string command, string[] args)
         {
+            int page = 1; // Default page
+            int pageSize = 10; // Number of participants per page
+
+            if (args.Length > 0 && int.TryParse(args[0], out int parsedPage))
+            {
+                page = Math.Max(1, parsedPage); // Ensure the page is at least 1
+            }
+
             if (isTournamentRunning)
             {
-                TimeSpan remainingTime = tournamentEndTime - DateTime.UtcNow;
-                player.ChatMessage($"Tournament is running! Time remaining: {remainingTime:hh\\:mm\\:ss}");
+                string timeRemainingMessage = GetTimeRemainingMessage();
+                player.ChatMessage(timeRemainingMessage);
 
-                // Display all participants and their scores
-                if (participantsData.Count > 0)
+                var participants = participantsData.Values.OrderByDescending(p => p.Score).ToList();
+                int totalPages = (int)Math.Ceiling((double)participants.Count / pageSize);
+
+                if (page > totalPages)
                 {
-                    player.ChatMessage("Current Participants and Scores:");
-                    foreach (var participant in participantsData.Values.OrderByDescending(p => p.Score))
-                    {
-                        player.ChatMessage($"{participant.Name}: {participant.Score} Points");
-                    }
-                }
-                else
-                {
-                    player.ChatMessage("No participants have joined the tournament yet.");
+                    player.ChatMessage($"Invalid page number. There are only {totalPages} page(s).");
+                    return;
                 }
 
-                // Show the player's own score
-                if (participantsData.TryGetValue(player.userID, out var participantData))
+                var participantList = string.Join("\n", participants.Skip((page - 1) * pageSize).Take(pageSize)
+                    .Select(p => $"{p.Name}: {p.Score} Points"));
+
+                Notify("ParticipantsAndScores", null, placeholders: new Dictionary<string, string>
                 {
-                    player.ChatMessage($"Your current score: {participantData.Score} Points");
-                }
-                else
-                {
-                    player.ChatMessage("You are not participating in this tournament.");
-                }
+                    {"Page", page.ToString()},
+                    {"TotalPages", totalPages.ToString()},
+                    {"PlayerList", participantList}
+                });
+
+                player.ChatMessage("Use /status_tournament <page_number> to view more.");
             }
             else if (tournamentStartTime > DateTime.UtcNow)
             {
-                TimeSpan timeUntilStart = tournamentStartTime - DateTime.UtcNow;
-                player.ChatMessage($"Tournament not running. Next start in {timeUntilStart.Days} day(s) and {timeUntilStart:hh\\:mm\\:ss}.");
+                string timeRemainingToStart = FormatTimeRemaining(tournamentStartTime - DateTime.UtcNow);
+                player.ChatMessage($"Tournament not running. Next start in {timeRemainingToStart}.");
             }
             else
             {
