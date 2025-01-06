@@ -1,70 +1,115 @@
-RustRoyale is a custom tournament plugin for Rust, ideal for players with limited time or those in different timezones. It enables competitive gameplay with a point-based system, allowing asynchronous participation. Features include automated scheduling, score tracking, and Discord integration for updates.
-# Key Features:
-## Dynamic Scoring System:
+RustRoyale is a custom tournament plugin for Rust, ideal for players with limited time or those in different timezones. It enables competitive gameplay with a point-based system, allowing asynchronous participation. Features include automated scheduling, advanced notifications, enhanced score tracking, and Discord integration for real-time updates.
 
-* Players earn 3 points for eliminating other players. (KILL)
-* Players lose 3 points when killed by other players. (DEAD)
-* Deaths due to NPCs, traps, or self-inflicted damage deduct 1 point. (JOKE)
-* Killing NPCs (e.g., Murderers, Zombies, Scientists, Scarecrows) awards 1 point. (NPC)
-* Destroying large entities like Helicopters or Bradley Tanks grants 5 points. (ENT)
+---
 
-## Notifications and Updates:
+## Key Features
 
-* Sends updates to the global Rust chat and Discord, ensuring participants and spectators are informed about significant events like kills, deaths, and score changes.
-* Displays the tournament time remaining and scores on demand via chat commands.
+### **Dynamic Scoring System**
+- Earn 3 points for eliminating other players. *(KILL)*
+- Lose 3 points when killed by other players. *(DEAD)*
+- Deduct 1 point for deaths due to NPCs, traps, or self-inflicted damage. *(JOKE)*
+- Kill NPCs (e.g., Murderers, Zombies, Scientists, Scarecrows) to gain 1 point. *(NPC)*
+- Destroy Helicopters or Bradley Tanks to earn 5 points. *(ENT)*
+
+---
+
+### **Notifications and Updates**
+- Customizable notifications for significant events, including kills, deaths, and score changes.
+- Dynamic countdowns and time-based alerts with configurable intervals.
+- Real-time updates sent to global Rust chat and Discord.
+- On-demand display of tournament time remaining and scores via chat commands.
 
 ![](https://potaetobag.live/imgs/potaetobag-rustroyale-ingame.png)
-
 ![](https://potaetobag.live/imgs/potaetobag-rustroyale-discord.png)
 
-## Automation and Safety Features:
+---
 
-* Automatically starts tournaments on a configurable schedule.
-* Ensures only valid actions are scored, with safeguards to prevent NPCs or environmental interactions from disrupting the score system.
+### **Automation and Safety Features**
+- Automatic tournament scheduling with flexible configurations.
+- Safeguards to ensure only valid actions are scored, preventing score disruptions by NPCs or environmental factors.
+- Thread-safe data handling and periodic backups to ensure reliability.
+- Automatic cleanup of outdated tournament data files.
 
-## Configuration:
-```
+---
+
+### **Advanced Features**
+- **Top Players Tracking**: Configurable to highlight the top performers at the tournament’s end.
+- **Customizable Message Templates**: Easily modify system messages to suit your server's tone.
+- **Player Name Caching**: Improved performance with dynamic caching of participant names.
+- **Historical Data**: Save tournament results, including top players, in separate history and winners files.
+- **Pagination for Scores**: Simplified management of large tournaments with paginated participant score display.
+
+---
+
+## Configuration
+```json
 {
   "DiscordWebhookUrl": "",
-  "ChatIconSteamId": "76561198332731279",
+  "ChatIconSteamId": "76561199815164411",
   "ChatUsername": "[RustRoyale]",
   "AutoStartEnabled": true,
   "StartDay": "Friday",
   "StartHour": 14,
   "DurationHours": 72,
   "DataRetentionDays": 30,
+  "TopPlayersToTrack": 3,
+  "NotificationIntervals": [600, 60],
   "ScoreRules": {
     "KILL": 3,
     "DEAD": -3,
     "JOKE": -1,
     "NPC": 1,
     "ENT": 5
+  },
+  "MessageTemplates": {
+    "StartTournament": "The tournament has started! Good luck to all participants! Time left: {TimeRemaining}.",
+    "EndTournament": "The tournament has ended! Congratulations to the top players!",
+    "PlayerScoreUpdate": "{PlayerName} earned {Score} point{PluralS} for {Action}.",
+    "TopPlayers": "Top {Count} players: {PlayerList}.",
+    "TimeRemaining": "Time remaining in the tournament: {Time}."
   }
 }
 ```
 
-## Command Suite:
+---
 
-* `/start_tournament` – Manually start a tournament.
-* `/end_tournament` – End an ongoing tournament and announce winners.
-* `/time_tournament` – Check the remaining time in the tournament.
-* `/score_tournament` – Display the current scores of all players.
-* `/enter_tournament` – Allows players to join the tournament.
-* `/exit_tournament` – Allows players to leave the tournament.
-* `/open_tournament` – Allows players to leave the tournament.
-* `/close_tournament` – Opt-out from automatic participation in future tournaments.
-* `/status_tournament` – Displays the tournament's current status or countdown to the next tournament.
+## Command Suite
+- `/start_tournament` – Start a tournament manually.
+- `/end_tournament` – End an ongoing tournament and announce winners.
+- `/time_tournament` – View the remaining tournament time.
+- `/score_tournament` – Display current player scores.
+- `/enter_tournament` – Join the tournament.
+- `/exit_tournament` – Leave the tournament.
+- `/open_tournament` – Enable automatic participation in future tournaments.
+- `/close_tournament` – Disable automatic participation in future tournaments.
+- `/status_tournament` – View tournament status, scores, and countdowns with pagination.
 
-## Permissions:
-```
+---
+
+## Permissions
+```bash
 oxide.grant user SteamID rustroyale.admin
 oxide.revoke user SteamID rustroyale.admin
 ```
 
-## What's Next?
-* Find, steal, or destroy the opponent's token to score points. This strategy is especially useful when there’s a large point difference. A quick find might save you from losing, but your opponent could have the best defense, putting you in an even worse position. (DSS)
-* Earn points for building structures that deceive your opponent and hide the token. This tactic can make your opponent waste time searching for the token, ultimately losing the tournament by failing to match your score. (DISS)
-* Penalties for camping outside designated safe zones include temporary server time-outs and a reduction or freeze of accumulated points. (BAD)
-* The player will be granted 3 points for a clean headshot done to an animal or NPC over a long distance ( 150 meters). (SHOT)
+---
 
-RustRoyale fosters competitive and engaging gameplay, combining dynamic mechanics with a seamless interface for managing tournaments. It’s a must-have for server administrators looking to elevate player engagement and interaction.
+## What's New in Version 1.0.3?
+- **Top Players Tracking**: Configure how many top players are highlighted post-tournament.
+- **Customizable Notifications**: Dynamic notifications with configurable time intervals.
+- **Message Templates**: Tailor system messages to fit your server's style.
+- **Improved Countdown Logic**: Simplified and efficient tournament scheduling and reminders.
+- **Enhanced Score Display**: Paginated score view for better management in large tournaments.
+- **Data Safety**: Thread-safe participant data handling and periodic backups.
+- **Historical Data**: Export tournament history and winners for long-term tracking.
+
+---
+
+## Future Plans
+- Introduce new scoring opportunities for advanced player actions.
+- Add penalties for camping and unsportsmanlike behavior.
+- Reward skillful actions like long-distance headshots on NPCs or animals.
+
+---
+
+RustRoyale fosters competitive and engaging gameplay, combining dynamic mechanics with a seamless interface for managing tournaments. It’s a must-have plugin for server administrators looking to elevate player interaction and community engagement!
