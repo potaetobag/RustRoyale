@@ -42,6 +42,7 @@ RustRoyale is a custom tournament plugin for Rust, ideal for players with limite
 ---
 
 ## Configuration
+
 ```json
 {
   "DiscordWebhookUrl": "",
@@ -74,6 +75,7 @@ RustRoyale is a custom tournament plugin for Rust, ideal for players with limite
 ---
 
 ## Command Suite
+
 - `/start_tournament` – Start a tournament manually.
 - `/end_tournament` – End an ongoing tournament and announce winners.
 - `/time_tournament` – View the remaining tournament time.
@@ -87,6 +89,7 @@ RustRoyale is a custom tournament plugin for Rust, ideal for players with limite
 ---
 
 ## Permissions
+
 ```bash
 oxide.grant user SteamID rustroyale.admin
 oxide.revoke user SteamID rustroyale.admin
@@ -94,7 +97,8 @@ oxide.revoke user SteamID rustroyale.admin
 
 ---
 
-## What's New in Version 1.0.3?
+## What's New in Version 1.0.4?
+
 - **Top Players Tracking**: Configure how many top players are highlighted post-tournament.
 - **Customizable Notifications**: Dynamic notifications with configurable time intervals.
 - **Message Templates**: Tailor system messages to fit your server's style.
@@ -106,6 +110,7 @@ oxide.revoke user SteamID rustroyale.admin
 ---
 
 ## Future Plans
+
 - Introduce new scoring opportunities for advanced player actions.
 - Add penalties for camping and unsportsmanlike behavior.
 - Reward skillful actions like long-distance headshots on NPCs or animals.
@@ -113,3 +118,4 @@ oxide.revoke user SteamID rustroyale.admin
 ---
 
 RustRoyale fosters competitive and engaging gameplay, combining dynamic mechanics with a seamless interface for managing tournaments. It’s a must-have plugin for server administrators looking to elevate player interaction and community engagement!
+
