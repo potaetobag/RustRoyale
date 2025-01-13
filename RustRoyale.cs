@@ -11,7 +11,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.0.5"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.0.6"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
     
@@ -27,7 +27,7 @@ namespace Oxide.Plugins
             public bool AutoStartEnabled { get; set; } = true;
             public string StartDay { get; set; } = "Friday";
             public int StartHour { get; set; } = 14;
-            public int StartMinute { get; set; } = 0; // Default to the top of the hour
+            public int StartMinute { get; set; } = 0;
             public int DurationHours { get; set; } = 72;
             public int DataRetentionDays { get; set; } = 30; // Default to 30 days
             public int TopPlayersToTrack { get; set; } = 3; // Default to Top 3 players
@@ -432,7 +432,7 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                Puts($"[Debug] Timer tick. Remaining time: {remainingTime.TotalSeconds}s.");
+                // Puts($"[Debug] Timer tick. Remaining time: {remainingTime.TotalSeconds}s.");
             });
         }
 
@@ -544,7 +544,7 @@ namespace Oxide.Plugins
             }
             else
             {
-                Puts($"[Debug] No notification sent for {remainingSeconds}s remaining. Last notified: {lastNotifiedMinutes}s");
+                //Puts($"[Debug] No notification sent for {remainingSeconds}s remaining. Last notified: {lastNotifiedMinutes}s");
             }
         }
 
@@ -592,7 +592,7 @@ namespace Oxide.Plugins
                 }
 
                 TimeSpan remainingTime = tournamentEndTime - DateTime.UtcNow;
-                Puts($"[Debug] Tournament countdown: {FormatTimeRemaining(remainingTime)} remaining.");
+                // Puts($"[Debug] Tournament countdown: {FormatTimeRemaining(remainingTime)} remaining.");
             });
         }
 
@@ -760,16 +760,6 @@ namespace Oxide.Plugins
                 // Log the end of the tournament in the event file
                 LogEvent("Tournament ended successfully.");
 
-                // Cleanup timers if active
-                countdownTimer?.Destroy();
-                countdownTimer = null;
-
-                // Reset stats for participants (optional, depending on desired behavior)
-                foreach (var participant in participantsData.Values)
-                {
-                    participant.Score = 0;
-                }
-
                 // Prepare leaderboard/results
                 string resultsMessage = "Leaderboard:\n";
                 if (sortedParticipants.Any())
@@ -796,6 +786,20 @@ namespace Oxide.Plugins
                 Puts($"[RustRoyale] [Debug] Notifications sent for tournament end: {globalMessage}");
 
                 Puts($"[Debug] Tournament successfully ended. Total participants: {sortedParticipants.Count}");
+
+                // Reset stats for participants AFTER leaderboard notifications
+                foreach (var participant in participantsData.Values)
+                {
+                    participant.Score = 0;
+                }
+
+                // Cleanup timers if active
+                countdownTimer?.Destroy();
+                countdownTimer = null;
+
+                // Schedule the next tournament
+                Puts("[Debug] Scheduling the next tournament.");
+                ScheduleTournament();
             }
             catch (Exception ex)
             {
@@ -806,16 +810,17 @@ namespace Oxide.Plugins
 
         private void OnPlayerInit(BasePlayer player)
         {
-            if (player != null && !string.IsNullOrEmpty(player.displayName))
-            {
-                playerNameCache[player.userID] = player.displayName;
+            if (player == null || string.IsNullOrEmpty(player.displayName))
+                return;
 
-                // Update participantsData dynamically and save if needed
-                if (participantsData.TryGetValue(player.userID, out var participant) && participant.Name == "Unknown")
-                {
-                    participant.Name = player.displayName;
-                    SaveParticipantsData();
-                }
+            playerNameCache[player.userID] = player.displayName;
+
+            // Update participantsData dynamically
+            if (participantsData.TryGetValue(player.userID, out var participant) && participant.Name == "Unknown")
+            {
+                participant.Name = player.displayName;
+                SaveParticipantsData();
+                Puts($"Updated participant data: {player.userID} now has name '{player.displayName}'.");
             }
         }
 
@@ -841,156 +846,119 @@ namespace Oxide.Plugins
             // Prevent scoring for self-kills
             if (attacker != null && attacker == victim && participants.Contains(victim.userID))
             {
-                if (!Configuration.ScoreRules.TryGetValue("JOKE", out int points))
+                if (Configuration.ScoreRules.TryGetValue("JOKE", out int points))
                 {
-                    Puts("[Debug] ScoreRules does not contain the key 'JOKE' or the value is invalid.");
-                    return;
+                    UpdatePlayerScore(victim.userID, "JOKE", "self-inflicted death", victim, info);
+                    Puts($"[Debug] {victim.displayName} died due to a self-inflicted cause.");
                 }
-
-                UpdatePlayerScore(victim.userID, "JOKE", "self-inflicted death", victim, info);
-                Puts($"[Debug] Notification sent for {victim.displayName} dying due to a self-inflicted cause.");
                 return;
             }
 
-            // Identify NPCs
+            // Identify if the victim is an NPC or an animal
             bool isVictimNPC = victim.ShortPrefabName.Contains("murderer") ||
                             victim.ShortPrefabName.Contains("zombie") ||
                             victim.ShortPrefabName.Contains("scientist") ||
                             victim.ShortPrefabName.Contains("scarecrow") ||
-                            victim.ShortPrefabName.Contains("animal") ||
                             victim.ShortPrefabName.Contains("tunneldweller") ||
                             victim.ShortPrefabName.Contains("underwaterdweller") ||
                             victim.ShortPrefabName.Contains("animal") ||
                             victim.ShortPrefabName.Contains("bear") ||
                             victim.ShortPrefabName.Contains("wolf") ||
-                            victim.ShortPrefabName.Contains("boar");
-                            ;
+                            victim.ShortPrefabName.Contains("boar") ||
+                            victim.ShortPrefabName.Contains("shark"); // Added "shark"
 
-            // Identify Entities
+            // Identify if the victim is a special entity
             bool isVictimEntity = victim.ShortPrefabName.Contains("helicopter") ||
                                 victim.ShortPrefabName.Contains("bradley");
 
             Puts($"[Debug] Victim: {victim.displayName} ({victim.ShortPrefabName}), IsNPC: {isVictimNPC}, IsEntity: {isVictimEntity}");
 
-            // Handle NPC kills by traps/turrets/sentries
+            // Handle Helicopter or Bradley deaths (treated as "JOKE")
+            if (isVictimEntity && participants.Contains(victim.userID))
+            {
+                if (Configuration.ScoreRules.TryGetValue("JOKE", out int points))
+                {
+                    UpdatePlayerScore(victim.userID, "JOKE", $"being killed by a {victim.ShortPrefabName}", victim);
+                    Puts($"[Debug] {victim.displayName} was killed by a {victim.ShortPrefabName}.");
+                }
+                return;
+            }
+
+            // Handle NPC or animal deaths caused by traps/turrets/sentries
             if (isVictimNPC && initiatorEntity != null)
             {
                 var ownerId = initiatorEntity.OwnerID;
                 if (ownerId != 0 && participants.Contains(ownerId))
                 {
-                    if (!Configuration.ScoreRules.TryGetValue("NPC", out int pointsForOwner))
+                    if (Configuration.ScoreRules.TryGetValue("NPC", out int points))
                     {
-                        Puts("[Debug] ScoreRules does not contain the key 'NPC' or the value is invalid.");
-                        return;
+                        UpdatePlayerScore(ownerId, "NPC", $"killing an NPC or animal with {initiatorEntity.ShortPrefabName}", victim);
+                        Puts($"[Debug] {GetPlayerName(ownerId)} gained points for killing {victim.ShortPrefabName}.");
                     }
-
-                    UpdatePlayerScore(ownerId, "NPC", $"killing an NPC with {initiatorEntity.ShortPrefabName}", victim);
-
-                    Puts($"[Debug] {GetPlayerName(ownerId)} gained a point for killing an NPC ({victim.ShortPrefabName}) with {initiatorEntity.ShortPrefabName}.");
-                    return;
                 }
+                return;
             }
 
-            // Player kills an NPC
+            // Player kills an NPC or animal
             if (isVictimNPC && attacker != null && !attacker.IsNpc && participants.Contains(attacker.userID))
             {
-                if (!Configuration.ScoreRules.TryGetValue("NPC", out int points))
+                if (Configuration.ScoreRules.TryGetValue("NPC", out int points))
                 {
-                    Puts("[Debug] ScoreRules does not contain the key 'NPC' or the value is invalid.");
-                    return;
+                    UpdatePlayerScore(attacker.userID, "NPC", "killing an NPC or animal", victim);
+                    Puts($"[Debug] {attacker.displayName} gained points for killing {victim.ShortPrefabName}.");
                 }
-
-                UpdatePlayerScore(attacker.userID, "NPC", "killing an NPC", victim);
-
-                Puts($"[Debug] Score updated and notification sent for {attacker.displayName} killing an NPC.");
                 return;
             }
 
-            // Player destroys a Helicopter or Bradley
-            if (isVictimEntity && attacker != null && !attacker.IsNpc && participants.Contains(attacker.userID))
-            {
-                if (!Configuration.ScoreRules.TryGetValue("ENT", out int points))
-                {
-                    Puts("[Debug] ScoreRules does not contain the key 'ENT' or the value is invalid.");
-                    return;
-                }
-
-                UpdatePlayerScore(attacker.userID, "ENT", "destroying a Helicopter or Bradley", victim);
-
-                Puts($"[Debug] Score updated and notification sent for {attacker.displayName} destroying an entity.");
-                return;
-            }
-
-            // Self-inflicted deaths (Unrecognized causes default to "JOKE")
+            // Self-inflicted deaths (default to "JOKE" for unrecognized causes)
             if ((attacker == null || attacker == victim) && participants.Contains(victim.userID))
             {
-                if (!Configuration.ScoreRules.TryGetValue("JOKE", out int points))
+                if (Configuration.ScoreRules.TryGetValue("JOKE", out int points))
                 {
-                    Puts("[Debug] ScoreRules does not contain the key 'JOKE' or the value is invalid.");
-                    return;
+                    string cause = info?.damageTypes?.GetMajorityDamageType().ToString() ?? "unknown cause";
+                    UpdatePlayerScore(victim.userID, "JOKE", $"death by {cause}", victim, info);
+                    Puts($"[Debug] {victim.displayName} died from {cause}.");
                 }
-
-                string cause = info?.damageTypes?.GetMajorityDamageType().ToString() ?? "unknown cause";
-
-                UpdatePlayerScore(victim.userID, "JOKE", $"death by {cause}", victim, info);
-                Puts($"[Debug] Notification sent for {victim.displayName} dying from {cause}.");
                 return;
             }
 
-            // Player is killed by an NPC
+            // Player killed by an NPC
             if ((attacker == null || attacker.IsNpc) && participants.Contains(victim.userID))
             {
-                if (!Configuration.ScoreRules.TryGetValue("JOKE", out int points))
+                if (Configuration.ScoreRules.TryGetValue("JOKE", out int points))
                 {
-                    Puts("[Debug] ScoreRules does not contain the key 'JOKE' or the value is invalid.");
-                    return;
+                    UpdatePlayerScore(victim.userID, "JOKE", "being killed by an NPC", victim);
+                    Puts($"[Debug] {victim.displayName} was killed by an NPC.");
                 }
-
-                UpdatePlayerScore(victim.userID, "JOKE", "being killed by an NPC", victim);
-
-                Puts($"[Debug] Notification sent for {victim.displayName} being killed by an NPC.");
                 return;
             }
 
             // Player kills another player
             if (attacker != null && participants.Contains(attacker.userID) && participants.Contains(victim.userID))
             {
-                if (!Configuration.ScoreRules.TryGetValue("DEAD", out int pointsForVictim) ||
-                    !Configuration.ScoreRules.TryGetValue("KILL", out int pointsForAttacker))
+                if (Configuration.ScoreRules.TryGetValue("DEAD", out int pointsForVictim) &&
+                    Configuration.ScoreRules.TryGetValue("KILL", out int pointsForAttacker))
                 {
-                    Puts("[Debug] ScoreRules does not contain keys 'DEAD' or 'KILL' or their values are invalid.");
-                    return;
+                    UpdatePlayerScore(victim.userID, "DEAD", $"being killed by {attacker.displayName}", victim);
+                    UpdatePlayerScore(attacker.userID, "KILL", $"killing {victim.displayName}", victim);
+                    Puts($"[Debug] {attacker.displayName} killed {victim.displayName}.");
                 }
-
-                UpdatePlayerScore(victim.userID, "DEAD", $"being killed by {attacker.displayName}", victim);
-                Puts($"[Debug] Notifications sent for dead interaction between {attacker.displayName} and {victim.displayName}.");
-
-                UpdatePlayerScore(attacker.userID, "KILL", $"killing {victim.displayName}", victim);
-                Puts($"[Debug] Notifications sent for kill interaction between {attacker.displayName} and {victim.displayName}.");
                 return;
             }
 
-            // Player killed by a trap, turret, or sentry
+            // Player killed by traps, turrets, or sentries
             if (initiatorEntity != null && participants.Contains(victim.userID))
             {
                 var ownerId = initiatorEntity.OwnerID;
-
-                // Handle other entity kills
                 if (ownerId != 0 && participants.Contains(ownerId))
                 {
-                    if (!Configuration.ScoreRules.TryGetValue("KILL", out int pointsForOwner) ||
-                        !Configuration.ScoreRules.TryGetValue("DEAD", out int pointsForVictim))
+                    if (Configuration.ScoreRules.TryGetValue("KILL", out int pointsForOwner) &&
+                        Configuration.ScoreRules.TryGetValue("DEAD", out int pointsForVictim))
                     {
-                        Puts("[Debug] ScoreRules does not contain keys 'KILL' or 'DEAD' or their values are invalid.");
-                        return;
+                        UpdatePlayerScore(victim.userID, "DEAD", $"killed by {initiatorEntity.ShortPrefabName} owned by {GetPlayerName(ownerId)}", victim);
+                        UpdatePlayerScore(ownerId, "KILL", $"killing {victim.displayName} with {initiatorEntity.ShortPrefabName}", victim);
+                        Puts($"[Debug] {victim.displayName} was killed by {initiatorEntity.ShortPrefabName}, owned by {GetPlayerName(ownerId)}.");
                     }
-
-                    UpdatePlayerScore(victim.userID, "DEAD", $"killed by {initiatorEntity.ShortPrefabName} owned by {GetPlayerName(ownerId)}", victim);
-                    UpdatePlayerScore(ownerId, "KILL", $"killing {victim.displayName} with {initiatorEntity.ShortPrefabName}", victim);
-
-                    Puts($"[Debug] {victim.displayName} lost a point for being killed by {initiatorEntity.ShortPrefabName}, owned by {GetPlayerName(ownerId)}.");
-                    Puts($"[Debug] {GetPlayerName(ownerId)} gained a point for killing {victim.displayName} using {initiatorEntity.ShortPrefabName}.");
-                    return;
                 }
             }
         }
@@ -1001,19 +969,19 @@ namespace Oxide.Plugins
 
         private string GetPlayerName(ulong userId)
         {
-            // Check the cache first
-            if (playerNameCache.TryGetValue(userId, out var cachedName) && cachedName != "Unknown")
+            // 1. Check the cache first
+            if (playerNameCache.TryGetValue(userId, out var cachedName) && !string.IsNullOrEmpty(cachedName) && cachedName != "Unknown")
             {
                 return cachedName;
             }
 
-            // Attempt to retrieve the player's name if they are online
+            // 2. Try to retrieve the player if they are online or sleeping
             var player = BasePlayer.FindByID(userId) ?? BasePlayer.FindSleeping(userId);
             if (player != null && !string.IsNullOrEmpty(player.displayName))
             {
                 playerNameCache[userId] = player.displayName;
 
-                // Update participantsData and save if needed
+                // Update the participantsData if necessary
                 if (participantsData.TryGetValue(userId, out var participant) && participant.Name == "Unknown")
                 {
                     participant.Name = player.displayName;
@@ -1023,31 +991,35 @@ namespace Oxide.Plugins
                 return player.displayName;
             }
 
-            // Check participantsData for the player's name
+            // 3. Check participantsData for the player's name
             if (participantsData.TryGetValue(userId, out var participantFromData) && !string.IsNullOrEmpty(participantFromData.Name) && participantFromData.Name != "Unknown")
             {
                 playerNameCache[userId] = participantFromData.Name;
                 return participantFromData.Name;
             }
 
-            // Load from the Participants.json file if possible
+            // 4. Load from the Participants.json file if necessary
             try
             {
                 if (File.Exists(ParticipantsFile))
                 {
                     var participantsFromFile = JsonConvert.DeserializeObject<Dictionary<ulong, PlayerStats>>(File.ReadAllText(ParticipantsFile));
-                    if (participantsFromFile != null && participantsFromFile.TryGetValue(userId, out var participantFromFile) && participantFromFile.Name != "Unknown")
+                    if (participantsFromFile != null && participantsFromFile.TryGetValue(userId, out var participantFromFile))
                     {
-                        playerNameCache[userId] = participantFromFile.Name;
-
-                        // Update participantsData dynamically
-                        if (participantsData.TryGetValue(userId, out var participant) && participant.Name == "Unknown")
+                        // Update the cache and participantsData dynamically
+                        if (!string.IsNullOrEmpty(participantFromFile.Name) && participantFromFile.Name != "Unknown")
                         {
-                            participant.Name = participantFromFile.Name;
-                            SaveParticipantsData();
-                        }
+                            playerNameCache[userId] = participantFromFile.Name;
 
-                        return participantFromFile.Name;
+                            // Synchronize participantsData with file
+                            if (participantsData.TryGetValue(userId, out var participant) && participant.Name == "Unknown")
+                            {
+                                participant.Name = participantFromFile.Name;
+                                SaveParticipantsData();
+                            }
+
+                            return participantFromFile.Name;
+                        }
                     }
                 }
             }
@@ -1056,7 +1028,7 @@ namespace Oxide.Plugins
                 PrintWarning($"Failed to retrieve player name from Participants.json: {ex.Message}");
             }
 
-            // Fallback to "Unknown" if no valid name is found
+            // 5. Fallback: If the name is still "Unknown," log and attempt to update later
             return "Unknown";
         }
 
