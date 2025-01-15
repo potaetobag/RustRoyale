@@ -7,7 +7,8 @@ RustRoyale revolutionizes Rust gameplay with an action-packed, point-based tourn
 ### **Dynamic Scoring System**
 - Earn **3 points** for eliminating other players. *(KILL)*
 - Lose **3 points** when killed by other players. *(DEAD)*
-- Deduct **1 point** for deaths due to NPCs, traps, or self-inflicted damage. *(JOKE)*
+- Deduct **1 point** for deaths due to self-inflicted damage. *(JOKE)*
+- Lose **2 points** when killed by NPCs, including Helicopters or Bradley. *(BRUH)*
 - Kill NPCs (e.g., Murderers, Zombies, Scientists, Scarecrows) to gain **1 point.** *(NPC)*
 - Destroy Helicopters or Bradley Tanks to earn **5 points.** *(ENT)*
 
