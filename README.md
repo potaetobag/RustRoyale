@@ -143,8 +143,8 @@ oxide.revoke user SteamID rustroyale.admin
 ## Donations
 
 [![patreon](https://img.shields.io/badge/donate-patreon-orange)](https://www.patreon.com/c/Potaetobag)
-[![ko-fi](https://img.shields.io/badge/donate-ko-fi-red)](https://ko-fi.com/potaetobag)
-[![pally](https://img.shields.io/badge/donate-pally-purple)](https://ko-fi.com/potaetobag)
+[![ko-fi](https://img.shields.io/badge/donate-kofi-red)](https://ko-fi.com/potaetobag)
+[![pally](https://img.shields.io/badge/donate-pally-purple)](https://pally.gg/p/potaetobag)
 
 ---
 
