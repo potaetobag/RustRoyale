@@ -11,7 +11,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.0.7"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.0.8"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
     
@@ -381,7 +381,7 @@ namespace Oxide.Plugins
         {
             TimeSpan timeUntilTarget = targetTime - DateTime.UtcNow;
 
-            if (timeUntilTarget.TotalSeconds <= 0.999)
+            if (timeUntilTarget.TotalSeconds <= 1.555)
             {
                 Puts($"[Debug] Timer expired immediately for target: {targetTime}. Invoking completion.");
                 if (onCompletion != null)
@@ -412,7 +412,7 @@ namespace Oxide.Plugins
 
                 NotifyTournamentCountdown(remainingTime);
 
-                if (remainingTime.TotalSeconds <= 0.999)
+                if (remainingTime.TotalSeconds <= 1.555)
                 {
                     Puts("[Debug] Countdown timer expired; invoking completion.");
                     countdownTimer?.Destroy();
@@ -437,7 +437,7 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                // Puts($"[Debug] Timer tick. Remaining time: {remainingTime.TotalSeconds}s.");
+                 Puts($"[Debug] Timer tick. Remaining time: {remainingTime.TotalSeconds}s.");
             });
         }
 
@@ -549,7 +549,7 @@ namespace Oxide.Plugins
             }
             else
             {
-                //Puts($"[Debug] No notification sent for {remainingSeconds}s remaining. Last notified: {lastNotifiedMinutes}s");
+                Puts($"[Debug] No notification sent for {remainingSeconds}s remaining. Last notified: {lastNotifiedMinutes}s");
             }
         }
 
@@ -848,14 +848,12 @@ namespace Oxide.Plugins
                 return;
             }
 
-            // Recent death tracking safety
-            if (recentDeaths.TryGetValue(victim.userID, out var lastDeathTime))
+            // Prevent duplicate death processing
+            if (recentDeaths.TryGetValue(victim.userID, out var lastDeathTime) &&
+                (DateTime.UtcNow - lastDeathTime).TotalSeconds < RecentDeathWindowSeconds)
             {
-                if ((DateTime.UtcNow - lastDeathTime).TotalSeconds < RecentDeathWindowSeconds)
-                {
-                    Puts($"[Debug] Ignoring duplicate death event for {victim.displayName}. Last death: {lastDeathTime}.");
-                    return;
-                }
+                Puts($"[Debug] Ignoring duplicate death event for {victim.displayName}. Last death: {lastDeathTime}.");
+                return;
             }
 
             // Record the timestamp of the death
@@ -864,144 +862,38 @@ namespace Oxide.Plugins
             var attacker = info?.InitiatorPlayer;
             var initiatorEntity = info?.Initiator as BaseCombatEntity;
 
-            // Determine if the victim is an NPC or special entity
-            bool isVictimNPC = victim.ShortPrefabName.Contains("murderer") ||
-                            victim.ShortPrefabName.Contains("zombie") ||
-                            victim.ShortPrefabName.Contains("scientist") ||
-                            victim.ShortPrefabName.Contains("scarecrow") ||
-                            victim.ShortPrefabName.Contains("tunneldweller") ||
-                            victim.ShortPrefabName.Contains("underwaterdweller") ||
-                            victim.ShortPrefabName.Contains("animal") ||
-                            victim.ShortPrefabName.Contains("bear") ||
-                            victim.ShortPrefabName.Contains("wolf") ||
-                            victim.ShortPrefabName.Contains("boar") ||
-                            victim.ShortPrefabName.Contains("shark");
+            Puts($"[Debug] Victim: {victim.displayName} ({victim.ShortPrefabName}), Attacker: {attacker?.displayName ?? "Unknown"}, Entity: {initiatorEntity?.ShortPrefabName ?? "Unknown"}");
 
-            bool isVictimEntity = victim.ShortPrefabName.Contains("helicopter") ||
-                                victim.ShortPrefabName.Contains("bradley");
-
-            // Determine the type of attacker
-            bool isAttackerNPC = attacker != null && attacker.IsNpc;
-            bool isAttackerEntity = initiatorEntity != null &&
-                                    (initiatorEntity.ShortPrefabName.Contains("helicopter") ||
-                                    initiatorEntity.ShortPrefabName.Contains("bradley"));
-
-            string attackerType = isAttackerNPC ? "NPC" : 
-                                isAttackerEntity ? initiatorEntity.ShortPrefabName : "Unknown";
-
-            Puts($"[Debug] Victim: {victim.displayName} ({victim.ShortPrefabName}), IsNPC: {isVictimNPC}, IsEntity: {isVictimEntity}, AttackerType: {attackerType}");
-
-            // Prevent scoring for self-kills
-            if (attacker != null && attacker == victim && participants.Contains(victim.userID))
+            // Handle deaths caused by helicopters or Bradley tanks
+            if (initiatorEntity != null &&
+                (initiatorEntity.ShortPrefabName.Contains("helicopter") || initiatorEntity.ShortPrefabName.Contains("bradley")) &&
+                participants.Contains(victim.userID))
             {
-                if (Configuration.ScoreRules.TryGetValue("JOKE", out int points))
+                string entityType = initiatorEntity.ShortPrefabName.Contains("helicopter") ? "Helicopter" : "Bradley";
+
+                if (Configuration.ScoreRules.TryGetValue("BRUH", out int points))
                 {
-                    UpdatePlayerScore(victim.userID, "JOKE", "self-inflicted death", victim, info);
-                    Puts($"[Debug] {victim.displayName} died due to a self-inflicted cause.");
+                    UpdatePlayerScore(
+                        victim.userID,
+                        "BRUH",
+                        $"getting defeated by a {entityType}",
+                        victim,
+                        info,
+                        entityName: entityType
+                    );
+
+                    Puts($"[Debug] {victim.displayName} lost points for being defeated by a {entityType}.");
                 }
+
                 return;
             }
 
-            // Handle player killed by a trap, turret, or sentry
-            if (initiatorEntity != null && participants.Contains(victim.userID))
+            // Handle deaths caused by NPCs or unowned entities (BRUH)
+            if ((attacker != null && attacker.IsNpc) || (initiatorEntity != null && initiatorEntity.OwnerID == 0))
             {
-                string entityType = initiatorEntity.ShortPrefabName ?? "Unknown";
-                string friendlyEntityName = entityType switch
-                {
-                    "autoturret_deployed" => "autoturret",
-                    "guntrap" => "guntrap",
-                    "flameturret.deployed" => "flameturret",
-                    _ => entityType
-                };
+                string attackerTypeName = initiatorEntity?.ShortPrefabName ?? attacker?.ShortPrefabName ?? "Unknown";
 
-                var ownerId = initiatorEntity.OwnerID;
-                Puts($"[Debug] Initiator Entity: {entityType}, OwnerID: {ownerId}");
-
-                // Handle specific entities: autoturret, guntrap, flameturret, etc.
-                if (entityType.Contains("autoturret") || entityType.Contains("guntrap") || entityType.Contains("flameturret"))
-                {
-                    string ownerName = ownerId != 0 ? GetPlayerName(ownerId) : "Unknown";
-
-                    if (ownerId != 0 && participants.Contains(ownerId))
-                    {
-                        // Scoring for kills by participant-owned entities
-                        if (Configuration.ScoreRules.TryGetValue("KILL", out int pointsForOwner) &&
-                            Configuration.ScoreRules.TryGetValue("DEAD", out int pointsForVictim))
-                        {
-                            // Update victim's score
-                            UpdatePlayerScore(
-                                victim.userID,
-                                "DEAD",
-                                $"being killed by {friendlyEntityName} owned by {ownerName}",
-                                victim,
-                                info,
-                                attackerName: ownerName,
-                                entityName: friendlyEntityName
-                            );
-
-                            // Update entity owner's score
-                            UpdatePlayerScore(
-                                ownerId,
-                                "KILL",
-                                $"eliminating {victim.displayName} with {friendlyEntityName}",
-                                victim,
-                                info,
-                                attackerName: ownerName,
-                                entityName: friendlyEntityName,
-                                reverseMessage: true
-                            );
-
-                            Puts($"[Debug] {victim.displayName} lost points for being killed by {friendlyEntityName} owned by {ownerName}.");
-                            Puts($"[Debug] {ownerName} gained points for killing {victim.displayName} with {friendlyEntityName}.");
-                        }
-                    }
-                    else
-                    {
-                        // Unowned entity (trap, turret, etc.)
-                        if (Configuration.ScoreRules.TryGetValue("JOKE", out int jokePoints))
-                        {
-                            UpdatePlayerScore(
-                                victim.userID,
-                                "JOKE",
-                                $"death caused by an unowned {friendlyEntityName}",
-                                victim,
-                                info,
-                                entityName: friendlyEntityName
-                            );
-
-                            Puts($"[Debug] {victim.displayName} died due to an unowned {friendlyEntityName}.");
-                        }
-                    }
-                    return;
-                }
-
-            }    
-
-           // Handle player killed by NPC or special entity (BRUH score)
-            if ((isAttackerNPC || isAttackerEntity) && participants.Contains(victim.userID))
-            {
-                string attackerTypeName = "Unknown";
-
-                if (isAttackerNPC)
-                {
-                    // Regular NPC attacker
-                    attackerTypeName = initiatorEntity?.ShortPrefabName ?? "Unknown";
-                }
-                else if (isAttackerEntity)
-                {
-                    // Special entity attacker (Helicopter or Bradley)
-                    if (initiatorEntity.ShortPrefabName.Contains("helicopter"))
-                    {
-                        attackerTypeName = "Helicopter";
-                    }
-                    else if (initiatorEntity.ShortPrefabName.Contains("bradley"))
-                    {
-                        attackerTypeName = "Bradley APC";
-                    }
-                }
-
-                // Deduct points for being killed by an NPC or special entity (BRUH moment)
-                if (Configuration.ScoreRules.TryGetValue("BRUH", out int points))
+                if (participants.Contains(victim.userID) && Configuration.ScoreRules.TryGetValue("BRUH", out int points))
                 {
                     UpdatePlayerScore(
                         victim.userID,
@@ -1014,78 +906,112 @@ namespace Oxide.Plugins
 
                     Puts($"[Debug] {victim.displayName} lost points for being defeated by {attackerTypeName}.");
                 }
-                else
-                {
-                    Puts($"[Debug] No scoring rule found for category 'BRUH'. No points were deducted for {victim.displayName}.");
-                }
 
                 return;
             }
 
-            // Handle NPC or animal deaths caused by traps/turrets/sentries
-            if (isVictimNPC && initiatorEntity != null)
+            // Handle deaths caused by traps, turrets, or sentries
+            if (initiatorEntity != null && participants.Contains(victim.userID))
             {
-                var ownerId = initiatorEntity.OwnerID;
+                string entityType = initiatorEntity.ShortPrefabName ?? "Unknown";
+                string friendlyEntityName = entityType switch
+                {
+                    "autoturret_deployed" => "autoturret",
+                    "guntrap" => "guntrap",
+                    "flameturret.deployed" => "flameturret",
+                    _ => entityType
+                };
+
+                ulong ownerId = initiatorEntity.OwnerID;
+                string ownerName = ownerId != 0 ? GetPlayerName(ownerId) : "Unknown";
+
                 if (ownerId != 0 && participants.Contains(ownerId))
                 {
-                    if (Configuration.ScoreRules.TryGetValue("NPC", out int points))
+                    if (Configuration.ScoreRules.TryGetValue("KILL", out int pointsForOwner) &&
+                        Configuration.ScoreRules.TryGetValue("DEAD", out int pointsForVictim))
                     {
-                        UpdatePlayerScore(ownerId, "NPC", $"killing an NPC or animal with {initiatorEntity.ShortPrefabName}", victim);
-                        Puts($"[Debug] {GetPlayerName(ownerId)} gained points for killing {victim.ShortPrefabName}.");
+                        // Update victim's score
+                        UpdatePlayerScore(
+                            victim.userID,
+                            "DEAD",
+                            $"being killed by {friendlyEntityName} owned by {ownerName}",
+                            victim,
+                            info,
+                            attackerName: ownerName,
+                            entityName: friendlyEntityName
+                        );
+
+                        // Update entity owner's score
+                        UpdatePlayerScore(
+                            ownerId,
+                            "KILL",
+                            $"eliminating {victim.displayName} with {friendlyEntityName}",
+                            victim,
+                            info,
+                            attackerName: ownerName,
+                            entityName: friendlyEntityName,
+                            reverseMessage: true
+                        );
+
+                        Puts($"[Debug] {victim.displayName} lost points for being killed by {friendlyEntityName} owned by {ownerName}.");
+                        Puts($"[Debug] {ownerName} gained points for killing {victim.displayName} with {friendlyEntityName}.");
                     }
                 }
-                return;
-            }
-
-            // Player kills an NPC or animal
-            if (isVictimNPC && attacker != null && !attacker.IsNpc && participants.Contains(attacker.userID))
-            {
-                if (Configuration.ScoreRules.TryGetValue("NPC", out int points))
+                else
                 {
-                    UpdatePlayerScore(attacker.userID, "NPC", "killing an NPC or animal", victim);
-                    Puts($"[Debug] {attacker.displayName} gained points for killing {victim.ShortPrefabName}.");
+                    // Unowned entity (trap, turret, etc.)
+                    if (Configuration.ScoreRules.TryGetValue("JOKE", out int jokePoints))
+                    {
+                        UpdatePlayerScore(
+                            victim.userID,
+                            "JOKE",
+                            $"death caused by an unowned {friendlyEntityName}",
+                            victim,
+                            info,
+                            entityName: friendlyEntityName
+                        );
+
+                        Puts($"[Debug] {victim.displayName} died due to an unowned {friendlyEntityName}.");
+                    }
                 }
+
                 return;
             }
 
-            // Player destroys a Helicopter or Bradley
-            if (isVictimEntity && attacker != null && !attacker.IsNpc && participants.Contains(attacker.userID))
-            {
-                if (Configuration.ScoreRules.TryGetValue("ENT", out int points))
-                {
-                    UpdatePlayerScore(attacker.userID, "ENT", "destroying a Helicopter or Bradley", victim);
-                    Puts($"[Debug] {attacker.displayName} gained points for destroying {victim.ShortPrefabName}.");
-                }
-                return;
-            }
-
-            // Self-inflicted deaths (default to "JOKE" for unrecognized causes)
+            // Handle self-inflicted deaths (e.g., falling, drowning, explosions)
             if ((attacker == null || attacker == victim) && participants.Contains(victim.userID))
             {
+                string cause = info?.damageTypes?.GetMajorityDamageType().ToString() ?? "unknown cause";
+
                 if (Configuration.ScoreRules.TryGetValue("JOKE", out int points))
                 {
-                    string cause = info?.damageTypes?.GetMajorityDamageType().ToString() ?? "unknown cause";
-                    UpdatePlayerScore(victim.userID, "JOKE", $"death by {cause}", victim, info);
-                    Puts($"[Debug] {victim.displayName} died from {cause}.");
+                    UpdatePlayerScore(
+                        victim.userID,
+                        "JOKE",
+                        $"self-inflicted death ({cause})",
+                        victim,
+                        info
+                    );
+
+                    Puts($"[Debug] {victim.displayName} died from {cause} (self-inflicted).");
                 }
+
                 return;
             }
 
-            // Player kills another player
+            // Handle player kills another player
             if (attacker != null && participants.Contains(attacker.userID) && participants.Contains(victim.userID))
             {
                 if (Configuration.ScoreRules.TryGetValue("DEAD", out int pointsForVictim) &&
                     Configuration.ScoreRules.TryGetValue("KILL", out int pointsForAttacker))
                 {
-                    UpdatePlayerScore(victim.userID, "DEAD", $"being killed by {attacker.displayName}", victim);
-                    UpdatePlayerScore(attacker.userID, "KILL", $"killing {victim.displayName}", victim);
+                    UpdatePlayerScore(victim.userID, "DEAD", $"killed by {attacker.displayName}", victim);
+                    UpdatePlayerScore(attacker.userID, "KILL", $"eliminated {victim.displayName}", victim);
                     Puts($"[Debug] {attacker.displayName} killed {victim.displayName}.");
                 }
+
                 return;
             }
-
-            
-
         }
 
     #endregion
