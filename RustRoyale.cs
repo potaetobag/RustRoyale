@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using Oxide.Core;
 using Oxide.Core.Libraries;
+using Oxide.Core.Plugins;
 using UnityEngine;
 using System.Linq;
 using Newtonsoft.Json;
@@ -11,7 +12,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.0.8"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.0.9"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
     
@@ -437,7 +438,7 @@ namespace Oxide.Plugins
                     return;
                 }
 
-                 Puts($"[Debug] Timer tick. Remaining time: {remainingTime.TotalSeconds}s.");
+                // Puts($"[Debug] Timer tick. Remaining time: {remainingTime.TotalSeconds}s.");
             });
         }
 
@@ -862,49 +863,88 @@ namespace Oxide.Plugins
             var attacker = info?.InitiatorPlayer;
             var initiatorEntity = info?.Initiator as BaseCombatEntity;
 
-            Puts($"[Debug] Victim: {victim.displayName} ({victim.ShortPrefabName}), Attacker: {attacker?.displayName ?? "Unknown"}, Entity: {initiatorEntity?.ShortPrefabName ?? "Unknown"}");
+            string attackerName = attacker?.displayName ?? "Unknown";
+            string entityName = initiatorEntity?.ShortPrefabName ?? "Unknown";
+            ulong ownerId = initiatorEntity?.OwnerID ?? 0;
+            string ownerName = ownerId != 0 ? GetPlayerName(ownerId) : "None";
+
+            Puts($"[Debug] Death event detected: Victim={victim.displayName} (Type={victim.ShortPrefabName}), Attacker={attackerName}, Entity={entityName}, Owner={ownerName}.");
 
             // Handle deaths caused by helicopters or Bradley tanks
-            if (initiatorEntity != null &&
-                (initiatorEntity.ShortPrefabName.Contains("helicopter") || initiatorEntity.ShortPrefabName.Contains("bradley")) &&
-                participants.Contains(victim.userID))
+            if (initiatorEntity != null && participants.Contains(victim.userID))
             {
-                string entityType = initiatorEntity.ShortPrefabName.Contains("helicopter") ? "Helicopter" : "Bradley";
+                string entityType = null;
 
-                if (Configuration.ScoreRules.TryGetValue("BRUH", out int points))
+                // Ensure initiatorEntity's prefab name is checked
+                if (entityName.Contains("helicopter", StringComparison.OrdinalIgnoreCase))
                 {
-                    UpdatePlayerScore(
-                        victim.userID,
-                        "BRUH",
-                        $"getting defeated by a {entityType}",
-                        victim,
-                        info,
-                        entityName: entityType
-                    );
-
-                    Puts($"[Debug] {victim.displayName} lost points for being defeated by a {entityType}.");
+                    entityType = "Helicopter";
+                }
+                else if (entityName.Contains("bradley", StringComparison.OrdinalIgnoreCase))
+                {
+                    entityType = "Bradley";
                 }
 
-                return;
+                if (!string.IsNullOrEmpty(entityType))
+                {
+                    DamageType? majorityDamageType = info?.damageTypes?.GetMajorityDamageType();
+                    string damageTypeString = majorityDamageType.HasValue ? majorityDamageType.Value.ToString() : "Unknown";
+
+                    Puts($"[Debug] Helicopter/Bradley kill detected: Victim={victim.displayName}, Entity={entityType}, DamageType={damageTypeString}, EntityName={entityName}");
+
+                    if (Configuration.ScoreRules.TryGetValue("BRUH", out int points))
+                    {
+                        UpdatePlayerScore(
+                            victim.userID,
+                            "BRUH",
+                            $"getting defeated by a {entityType}",
+                            victim,
+                            info,
+                            entityName: entityType
+                        );
+
+                        Puts($"[Debug] {victim.displayName} lost points for being defeated by a {entityType}. Total score updated.");
+                    }
+
+                    return;
+                }
+                else
+                {
+                    DamageType? majorityDamageType = info?.damageTypes?.GetMajorityDamageType();
+                    string damageTypeString = majorityDamageType.HasValue ? majorityDamageType.Value.ToString() : "Unknown";
+
+                    Puts($"[Debug] Unhandled entity type in Helicopter/Bradley check. Victim={victim.displayName}, EntityName={entityName ?? "Unknown"}, DamageType={damageTypeString}");
+                }
             }
 
             // Handle deaths caused by NPCs or unowned entities (BRUH)
-            if ((attacker != null && attacker.IsNpc) || (initiatorEntity != null && initiatorEntity.OwnerID == 0))
+            if ((attacker != null && attacker.IsNpc) || (initiatorEntity != null && ownerId == 0))
             {
-                string attackerTypeName = initiatorEntity?.ShortPrefabName ?? attacker?.ShortPrefabName ?? "Unknown";
+                if (attacker != null && !string.IsNullOrEmpty(attacker.ShortPrefabName))
+                {
+                    attackerName = attacker.ShortPrefabName; // Assign proper NPC name
+                }
+                else if (initiatorEntity is BaseNpc npc && !string.IsNullOrEmpty(npc.ShortPrefabName))
+                {
+                    attackerName = npc.ShortPrefabName; // Assign proper NPC name
+                }
+                else if (initiatorEntity != null && string.IsNullOrEmpty(attackerName))
+                {
+                    attackerName = initiatorEntity.ShortPrefabName; // Use initiator's prefab name as fallback
+                }
 
                 if (participants.Contains(victim.userID) && Configuration.ScoreRules.TryGetValue("BRUH", out int points))
                 {
                     UpdatePlayerScore(
                         victim.userID,
                         "BRUH",
-                        $"being defeated by {attackerTypeName}",
+                        $"being defeated by {attackerName}",
                         victim,
                         info,
-                        entityName: attackerTypeName
+                        entityName: attackerName
                     );
 
-                    Puts($"[Debug] {victim.displayName} lost points for being defeated by {attackerTypeName}.");
+                    Puts($"[Debug] {victim.displayName} lost points for being defeated by {attackerName}.");
                 }
 
                 return;
@@ -913,24 +953,21 @@ namespace Oxide.Plugins
             // Handle deaths caused by traps, turrets, or sentries
             if (initiatorEntity != null && participants.Contains(victim.userID))
             {
-                string entityType = initiatorEntity.ShortPrefabName ?? "Unknown";
-                string friendlyEntityName = entityType switch
+                string friendlyEntityName = entityName switch
                 {
                     "autoturret_deployed" => "autoturret",
                     "guntrap" => "guntrap",
                     "flameturret.deployed" => "flameturret",
-                    _ => entityType
+                    _ => entityName
                 };
 
-                ulong ownerId = initiatorEntity.OwnerID;
-                string ownerName = ownerId != 0 ? GetPlayerName(ownerId) : "Unknown";
+                Puts($"[Debug] Trap/Turret kill detected: Entity={friendlyEntityName}, OwnerID={ownerId}, OwnerName={ownerName}");
 
                 if (ownerId != 0 && participants.Contains(ownerId))
                 {
                     if (Configuration.ScoreRules.TryGetValue("KILL", out int pointsForOwner) &&
                         Configuration.ScoreRules.TryGetValue("DEAD", out int pointsForVictim))
                     {
-                        // Update victim's score
                         UpdatePlayerScore(
                             victim.userID,
                             "DEAD",
@@ -941,7 +978,6 @@ namespace Oxide.Plugins
                             entityName: friendlyEntityName
                         );
 
-                        // Update entity owner's score
                         UpdatePlayerScore(
                             ownerId,
                             "KILL",
@@ -959,7 +995,6 @@ namespace Oxide.Plugins
                 }
                 else
                 {
-                    // Unowned entity (trap, turret, etc.)
                     if (Configuration.ScoreRules.TryGetValue("JOKE", out int jokePoints))
                     {
                         UpdatePlayerScore(
@@ -973,6 +1008,73 @@ namespace Oxide.Plugins
 
                         Puts($"[Debug] {victim.displayName} died due to an unowned {friendlyEntityName}.");
                     }
+                }
+
+                return;
+            }
+
+            // Handle Entity eliminated by player
+            if (initiatorEntity != null && attacker != null && !victim.IsNpc && participants.Contains(attacker.userID))
+            {
+                if (Configuration.ScoreRules.TryGetValue("ENT", out int points))
+                {
+                    UpdatePlayerScore(
+                        attacker.userID,
+                        "ENT",
+                        $"eliminating an entity ({victim.ShortPrefabName})",
+                        victim,
+                        info
+                    );
+
+                    Puts($"[Debug] {attacker.displayName} earned points for killing an entity ({victim.ShortPrefabName}).");
+                }
+                return;
+            }
+
+            // Handle NPCs killed by player
+            if (victim.IsNpc && attacker != null && participants.Contains(attacker.userID))
+            {
+                if (Configuration.ScoreRules.TryGetValue("NPC", out int points))
+                {
+                    UpdatePlayerScore(
+                        attacker.userID,
+                        "NPC",
+                        $"eliminating an NPC ({victim.ShortPrefabName})",
+                        victim,
+                        info
+                    );
+
+                    Puts($"[Debug] {attacker.displayName} earned points for killing an NPC ({victim.ShortPrefabName}).");
+                }
+                return;
+            }
+
+            // Handle NPCs killed by player-owned turrets
+            if (initiatorEntity != null && victim.IsNpc && ownerId != 0 && participants.Contains(ownerId))
+            {
+                string friendlyEntityName = entityName switch
+                {
+                    "autoturret_deployed" => "autoturret",
+                    "guntrap" => "guntrap",
+                    "flameturret.deployed" => "flameturret",
+                    _ => entityName
+                };
+
+                Puts($"[Debug] NPC kill detected: Victim={victim.displayName} (NPC), Entity={friendlyEntityName}, Owner={ownerName}");
+
+                if (Configuration.ScoreRules.TryGetValue("NPC", out int pointsForOwner))
+                {
+                    UpdatePlayerScore(
+                        ownerId,
+                        "NPC",
+                        $"eliminating an NPC ({victim.ShortPrefabName}) with {friendlyEntityName}",
+                        victim,
+                        info,
+                        attackerName: ownerName,
+                        entityName: friendlyEntityName
+                    );
+
+                    Puts($"[Debug] {ownerName} earned points for killing an NPC ({victim.ShortPrefabName}) with {friendlyEntityName}.");
                 }
 
                 return;
@@ -1005,9 +1107,9 @@ namespace Oxide.Plugins
                 if (Configuration.ScoreRules.TryGetValue("DEAD", out int pointsForVictim) &&
                     Configuration.ScoreRules.TryGetValue("KILL", out int pointsForAttacker))
                 {
-                    UpdatePlayerScore(victim.userID, "DEAD", $"killed by {attacker.displayName}", victim);
+                    UpdatePlayerScore(victim.userID, "DEAD", $"killed by {attackerName}", victim);
                     UpdatePlayerScore(attacker.userID, "KILL", $"eliminated {victim.displayName}", victim);
-                    Puts($"[Debug] {attacker.displayName} killed {victim.displayName}.");
+                    Puts($"[Debug] {attackerName} killed {victim.displayName}.");
                 }
 
                 return;
@@ -1353,6 +1455,8 @@ namespace Oxide.Plugins
                 template = template.Replace($"{{{placeholder.Key}}}", placeholder.Value);
             }
 
+            Server.Broadcast(template, ulong.Parse(Configuration.ChatIconSteamId));
+
             return template;
         }
 
@@ -1465,7 +1569,8 @@ namespace Oxide.Plugins
                 string formattedMessage = Configuration.ChatFormat.Replace("{message}", message);
 
                 // Send the message using the proper command
-                player.SendConsoleCommand("chat.add", ulong.Parse(Configuration.ChatIconSteamId), Configuration.ChatUsername, formattedMessage);
+                //player.SendConsoleCommand("chat.add", ulong.Parse(Configuration.ChatIconSteamId), Configuration.ChatUsername, formattedMessage);
+                Server.Broadcast(formattedMessage, ulong.Parse(Configuration.ChatIconSteamId));
             }
             catch (Exception ex)
             {
@@ -1497,7 +1602,8 @@ namespace Oxide.Plugins
                     string formattedMessage = Configuration.ChatFormat.Replace("{message}", message);
 
                     // Send the message using the proper command
-                    player.SendConsoleCommand("chat.add", ulong.Parse(Configuration.ChatIconSteamId), Configuration.ChatUsername, formattedMessage);
+                    //player.SendConsoleCommand("chat.add", ulong.Parse(Configuration.ChatIconSteamId), Configuration.ChatUsername, formattedMessage);
+                    Server.Broadcast(formattedMessage, ulong.Parse(Configuration.ChatIconSteamId));
                 }
                 catch (Exception ex)
                 {
