@@ -12,7 +12,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.0.9"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.1.0"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
     
@@ -283,7 +283,7 @@ namespace Oxide.Plugins
 
     #region Data Logging
         private string DataDirectory => $"{Interface.Oxide.DataDirectory}/RustRoyale";
-        private string CurrentTournamentFile => $"{DataDirectory}/Tournament_{DateTime.UtcNow:yyyyMMddHHmmss}.data";
+        private string currentTournamentFile; // Stores the current tournament file path
 
         private void EnsureDataDirectory()
         {
@@ -294,17 +294,35 @@ namespace Oxide.Plugins
             }
         }
 
+        private void StartTournamentFile()
+        {
+            EnsureDataDirectory();
+
+            // Generate the file name once at the start of the tournament
+            if (string.IsNullOrEmpty(currentTournamentFile))
+            {
+                currentTournamentFile = $"{DataDirectory}/Tournament_{DateTime.UtcNow:yyyyMMddHHmmss}.data";
+                LogMessage($"Created new tournament log file: {currentTournamentFile}");
+            }
+        }
+
         private void LogEvent(string message)
         {
             try
             {
-                EnsureDataDirectory();
-                File.AppendAllText(CurrentTournamentFile, $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff} - {message}\n");
+                if (string.IsNullOrEmpty(currentTournamentFile))
+                {
+                    PrintWarning("Tournament file has not been initialized. Call StartTournamentFile() first.");
+                    return;
+                    StartTournamentFile();
+                }
+
+                File.AppendAllText(currentTournamentFile, $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff} - {message}\n");
             }
             catch (Exception ex)
-        {
-            PrintError($"Unexpected error: {ex.Message}\n{ex.StackTrace}");
-        }
+            {
+                PrintError($"Unexpected error while logging event: {ex.Message}\n{ex.StackTrace}");
+            }
         }
 
         private void ManageOldTournamentFiles()
@@ -315,21 +333,21 @@ namespace Oxide.Plugins
                 DateTime cutoffDate = DateTime.UtcNow.AddDays(-Configuration.DataRetentionDays);
 
                 foreach (var file in files)
-        {
-            var fileInfo = new FileInfo(file);
-            if (fileInfo.LastWriteTimeUtc < cutoffDate)
-            {
-                try
                 {
-                    File.Delete(file);
-                    LogEvent($"Deleted old tournament file: {file}");
+                    var fileInfo = new FileInfo(file);
+                    if (fileInfo.LastWriteTimeUtc < cutoffDate)
+                    {
+                        try
+                        {
+                            File.Delete(file);
+                            LogMessage($"Deleted old tournament file: {file}");
+                        }
+                        catch (Exception ex)
+                        {
+                            PrintError($"Failed to delete file {file}: {ex.Message}");
+                        }
+                    }
                 }
-                catch (Exception ex)
-                {
-                    PrintError($"Failed to delete file {file}: {ex.Message}");
-                }
-            }
-        }
             }
             catch (Exception ex)
             {
@@ -340,10 +358,16 @@ namespace Oxide.Plugins
         private void LogParticipants()
         {
             EnsureDataDirectory();
+
+            if (string.IsNullOrEmpty(currentTournamentFile))
+            {
+                PrintWarning("Tournament file has not been initialized. Call StartTournamentFile() first.");
+                return;
+            }
+
             string participantsLog = $"Participants at tournament start: {string.Join(", ", participantsData.Values.Select(p => p.Name))}";
             LogEvent(participantsLog);
         }
-    
     #endregion
 
     #region Schedule Tournament
@@ -644,6 +668,8 @@ namespace Oxide.Plugins
         private void StartTournament()
         {
             Puts("[Debug] StartTournament invoked.");
+
+            StartTournamentFile();
 
             try
             {
