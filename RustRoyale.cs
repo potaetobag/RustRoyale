@@ -867,34 +867,34 @@ namespace Oxide.Plugins
         private readonly ConcurrentDictionary<ulong, DateTime> recentDeaths = new ConcurrentDictionary<ulong, DateTime>();
         private const int RecentDeathWindowSeconds = 5;
 
-        private void OnPlayerDeath(BasePlayer victim, HitInfo info)
-        {
-            if (!isTournamentRunning || victim == null)
-            {
-                Puts("[Debug] Tournament is not running or victim is null.");
-                return;
-            }
+		private void OnPlayerDeath(BasePlayer victim, HitInfo info)
+		{
+			if (!isTournamentRunning || victim == null)
+			{
+				Puts("[Debug] Tournament is not running or victim is null.");
+				return;
+			}
 
-            // Prevent duplicate death processing
-            if (recentDeaths.TryGetValue(victim.userID, out var lastDeathTime) &&
-                (DateTime.UtcNow - lastDeathTime).TotalSeconds < RecentDeathWindowSeconds)
-            {
-                Puts($"[Debug] Ignoring duplicate death event for {victim.displayName}. Last death: {lastDeathTime}.");
-                return;
-            }
+			// Prevent duplicate death processing
+			if (recentDeaths.TryGetValue(victim.userID, out var lastDeathTime) &&
+				(DateTime.UtcNow - lastDeathTime).TotalSeconds < RecentDeathWindowSeconds)
+			{
+				Puts($"[Debug] Ignoring duplicate death event for {victim.displayName}. Last death: {lastDeathTime}.");
+				return;
+			}
 
-            // Record the timestamp of the death
-            recentDeaths[victim.userID] = DateTime.UtcNow;
+			// Record the timestamp of the death
+			recentDeaths[victim.userID] = DateTime.UtcNow;
 
-            var attacker = info?.InitiatorPlayer;
-            var initiatorEntity = info?.Initiator as BaseCombatEntity;
+			var attacker = info?.InitiatorPlayer;
+			var initiatorEntity = info?.Initiator as BaseCombatEntity;
 
-            string attackerName = attacker?.displayName ?? "Unknown";
-            string entityName = initiatorEntity?.ShortPrefabName ?? "Unknown";
-            ulong ownerId = initiatorEntity?.OwnerID ?? 0;
-            string ownerName = ownerId != 0 ? GetPlayerName(ownerId) : "None";
+			string attackerName = attacker?.displayName ?? "Unknown";
+			string entityName = initiatorEntity?.ShortPrefabName ?? "Unknown";
+			ulong ownerId = initiatorEntity?.OwnerID ?? 0;
+			string ownerName = ownerId != 0 ? GetPlayerName(ownerId) : "None";
 
-            Puts($"[Debug] Death event detected: Victim={victim.displayName} (Type={victim.ShortPrefabName}), Attacker={attackerName}, Entity={entityName}, Owner={ownerName}.");
+			Puts($"[Debug] Death event detected: Victim={victim.displayName} (Type={victim.ShortPrefabName}), Attacker={attackerName}, Entity={entityName}, Owner={ownerName}.");
 
             // Handle deaths caused by helicopters or Bradley tanks
             if (initiatorEntity != null && participants.Contains(victim.userID))
@@ -942,9 +942,14 @@ namespace Oxide.Plugins
                     Puts($"[Debug] Unhandled entity type in Helicopter/Bradley check. Victim={victim.displayName}, EntityName={entityName ?? "Unknown"}, DamageType={damageTypeString}");
                 }
             }
+			
+			    Puts($"[Debug] ❌ ENT Kills Player Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
 
             // Handle deaths caused by NPCs or unowned entities (BRUH)
-            if ((attacker != null && attacker.IsNpc) || (initiatorEntity != null && ownerId == 0))
+            if (
+					(attacker != null && attacker.IsNpc) 
+					|| (initiatorEntity != null && ownerId == 0 && (attacker == null || attacker.IsNpc))
+				)
             {
                 if (attacker != null && !string.IsNullOrEmpty(attacker.ShortPrefabName))
                 {
@@ -975,6 +980,8 @@ namespace Oxide.Plugins
 
                 return;
             }
+			
+			    Puts($"[Debug] ❌ NPC Kills Player Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
 
             // Handle deaths caused by traps, turrets, or sentries
             if (initiatorEntity != null && participants.Contains(victim.userID))
@@ -1038,6 +1045,8 @@ namespace Oxide.Plugins
 
                 return;
             }
+			
+			    Puts($"[Debug] ❌ Death By Traps Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
 
             // Handle Entity eliminated by player
             if (initiatorEntity != null && attacker != null && !victim.IsNpc && participants.Contains(attacker.userID))
@@ -1056,24 +1065,47 @@ namespace Oxide.Plugins
                 }
                 return;
             }
+			
+			    Puts($"[Debug] ❌ ENT Killed By Player Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
+			
+			// Handle NPCs killed by player
+			if (victim.IsNpc && attacker != null)
+			{
+				bool isParticipant = participants.Contains(attacker.userID);
+				bool hasScoreRule = Configuration.ScoreRules.TryGetValue("NPC", out int points);
 
-            // Handle NPCs killed by player
-            if (victim.IsNpc && attacker != null && participants.Contains(attacker.userID))
-            {
-                if (Configuration.ScoreRules.TryGetValue("NPC", out int points))
-                {
-                    UpdatePlayerScore(
-                        attacker.userID,
-                        "NPC",
-                        $"eliminating an NPC ({victim.ShortPrefabName})",
-                        victim,
-                        info
-                    );
+				Puts($"[Debug] Checking NPC kill: Victim={victim.ShortPrefabName}, Attacker={attacker.displayName}, In Tournament={isParticipant}, Score Rule Exists={hasScoreRule}");
+				Puts($"[Debug] Available ScoreRules: {string.Join(", ", Configuration.ScoreRules.Keys)}");
 
-                    Puts($"[Debug] {attacker.displayName} earned points for killing an NPC ({victim.ShortPrefabName}).");
-                }
-                return;
-            }
+				if (isParticipant)
+				{
+					if (hasScoreRule)
+					{
+						Puts($"[Debug] Awarding {points} points for killing an NPC ({victim.ShortPrefabName}) to {attacker.displayName}.");
+
+						UpdatePlayerScore(
+							attacker.userID,
+							"NPC",
+							$"eliminating an NPC ({victim.ShortPrefabName})",
+							victim,
+							info
+						);
+
+						Puts($"[Debug] Score should now be updated for {attacker.displayName}.");
+					}
+					else
+					{
+						Puts("[Debug] No score rule found for NPC kills.");
+					}
+				}
+				else
+				{
+					Puts($"[Debug] {attacker.displayName} is not a tournament participant, skipping scoring.");
+				}
+				return;
+			}
+			
+			    Puts($"[Debug] ❌ NPC Killed By Player Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
 
             // Handle NPCs killed by player-owned turrets
             if (initiatorEntity != null && victim.IsNpc && ownerId != 0 && participants.Contains(ownerId))
@@ -1105,6 +1137,8 @@ namespace Oxide.Plugins
 
                 return;
             }
+			
+			    Puts($"[Debug] ❌ NPC KilledBy Player Traps Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
 
             // Handle self-inflicted deaths (e.g., falling, drowning, explosions)
             if ((attacker == null || attacker == victim) && participants.Contains(victim.userID))
@@ -1140,6 +1174,9 @@ namespace Oxide.Plugins
 
                 return;
             }
+			
+			    Puts($"[Debug] ❌ Player Kills Player Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
+
         }
 
     #endregion
@@ -1276,32 +1313,60 @@ namespace Oxide.Plugins
         private readonly object participantsDataLock = new object();
 
         private void SaveParticipantsData()
-        {
-            try
-            {
-                EnsureDataDirectory();
-                string serializedData;
+		{
+			try
+			{
+				EnsureDataDirectory(); // Ensure directory exists before writing
 
-                lock (participantsDataLock)
-                {
-                    serializedData = SerializeParticipantsData(participantsData);
-                }
+				string serializedData;
+				lock (participantsDataLock)
+				{
+					serializedData = SerializeParticipantsData(participantsData);
+				}
 
-                File.WriteAllText(ParticipantsFile, serializedData);
-            }
-            catch (IOException ioEx)
-            {
-                PrintError($"IO error while saving participants data: {ioEx.Message}");
-            }
-            catch (JsonException jsonEx)
-            {
-                PrintError($"Serialization error while saving participants data: {jsonEx.Message}");
-            }
-            catch (Exception ex)
-            {
-                PrintError($"Unexpected error while saving participants data: {ex.Message}");
-            }
-        }
+				// Debug Log: Before writing to file
+				Puts($"[Debug] Preparing to save Participants.json. Data:\n{serializedData}");
+
+				// Ensure the file is accessible before writing
+				if (File.Exists(ParticipantsFile))
+				{
+					try
+					{
+						using (FileStream fs = File.Open(ParticipantsFile, FileMode.Open, FileAccess.Read, FileShare.None))
+						{
+							Puts("[Debug] Participants.json is not in use. Proceeding with write.");
+						}
+					}
+					catch (IOException)
+					{
+						PrintWarning("[Warning] Participants.json is currently in use. Save operation skipped.");
+						return;
+					}
+				}
+
+				// Write the updated data to the file inside a lock
+				lock (participantsDataLock)
+				{
+					File.WriteAllText(ParticipantsFile, serializedData);
+				}
+
+				// Verify data was successfully written
+				string savedData = File.ReadAllText(ParticipantsFile);
+				Puts($"[Debug] Successfully saved Participants.json. Contents:\n{savedData}");
+			}
+			catch (IOException ioEx)
+			{
+				PrintError($"IO error while saving participants data: {ioEx.Message}");
+			}
+			catch (JsonException jsonEx)
+			{
+				PrintError($"Serialization error while saving participants data: {jsonEx.Message}");
+			}
+			catch (Exception ex)
+			{
+				PrintError($"Unexpected error while saving participants data: {ex.Message}");
+			}
+		}
 
         private string SerializeParticipantsData(ConcurrentDictionary<ulong, PlayerStats> participants)
         {
@@ -1317,68 +1382,89 @@ namespace Oxide.Plugins
         }
 
         private void UpdatePlayerScore(ulong userId, string actionCode, string actionDescription, BasePlayer victim = null, HitInfo info = null, string attackerName = null, string entityName = "Unknown", bool reverseMessage = false)
-        {
-            if (!participantsData.TryGetValue(userId, out var participant))
-            {
-                PrintWarning($"Player with UserID {userId} not found in participants.");
-                return;
-            }
+		{
+			// Debug start of function call
+			Puts($"[Debug] UpdatePlayerScore called for UserID={userId}, ActionCode={actionCode}, Victim={victim?.displayName ?? "None"}, Entity={entityName}");
 
-            if (!Configuration.ScoreRules.TryGetValue(actionCode, out int points))
-            {
-                PrintWarning($"Invalid action code: {actionCode}. No score adjustment made.");
-                return;
-            }
+			// Ensure player is in participantsData
+			if (!participantsData.TryGetValue(userId, out var participant))
+			{
+				PrintWarning($"[Error] Player with UserID {userId} not found in participants. Current participants: {string.Join(", ", participantsData.Keys)}");
+				return;
+			}
 
-            participant.Score += points;
-            SaveParticipantsData();
+			// Verify the actionCode exists in the ScoreRules
+			if (!Configuration.ScoreRules.TryGetValue(actionCode, out int points))
+			{
+				PrintWarning($"[Error] Invalid action code: {actionCode}. Available codes: {string.Join(", ", Configuration.ScoreRules.Keys)}");
+				return;
+			}
 
-            string pluralS = Math.Abs(points) == 1 ? "" : "s";
+			// Store previous score before update
+			int previousScore = participant.Score;
+			participant.Score += points;
 
-            // Determine the appropriate template key
-            string templateKey = reverseMessage ? "KillPlayerWithEntity" : actionCode switch
-            {
-                "KILL" => "KillPlayerWithEntity",
-                "DEAD" => "KilledByPlayer",
-                "JOKE" => "SelfInflictedDeath",
-                "NPC" => "KillNPC",
-                "ENT" => "KillEntity",
-                "BRUH" => "DeathByBRUH", // Explicit handling for "BRUH"
-                _ => "PlayerScoreUpdate"
-            };
+			// Debug updated score before saving
+			Puts($"[Debug] {participant.Name} (UserID: {userId}) | Previous Score: {previousScore} | Gained: {points} | New Score: {participant.Score}");
 
-            // Fetch the message template
-            if (!Configuration.MessageTemplates.TryGetValue(templateKey, out string template))
-            {
-                PrintWarning($"Message template for action code '{actionCode}' not found. Using default.");
-                template = Configuration.MessageTemplates["PlayerScoreUpdate"];
-            }
+			// Save updated scores and confirm write success
+			SaveParticipantsData();
+			
+			// Debug participants.json file after save
+			string savedData = File.ReadAllText(ParticipantsFile);
+			Puts($"[Debug] Participants.json after save: {savedData}");
 
-            // Resolve player names dynamically
-            attackerName ??= GetPlayerName(userId);
+			// Format pluralization
+			string pluralS = Math.Abs(points) == 1 ? "" : "s";
 
-            var placeholders = new Dictionary<string, string>
-            {
-                { "PlayerName", GetPlayerName(userId) },
-                { "VictimName", victim?.displayName ?? "Unknown" },
-                { "AttackerName", attackerName },
-                { "EntityName", entityName },
-                { "Score", points.ToString() },
-                { "TotalScore", participant.Score.ToString() },
-                { "Action", actionDescription },
-                { "PluralS", pluralS }
-            };
+			// Determine message template key
+			string templateKey = reverseMessage ? "KillPlayerWithEntity" : actionCode switch
+			{
+				"KILL" => "KillPlayerWithEntity",
+				"DEAD" => "KilledByPlayer",
+				"JOKE" => "SelfInflictedDeath",
+				"NPC" => "KillNPC",
+				"ENT" => "KillEntity",
+				"BRUH" => "DeathByBRUH",
+				_ => "PlayerScoreUpdate"
+			};
 
-            string globalMessage = FormatMessage(template, placeholders);
-            SendTournamentMessage(globalMessage);
+			// Fetch the message template
+			if (!Configuration.MessageTemplates.TryGetValue(templateKey, out string template))
+			{
+				PrintWarning($"[Error] Message template for action code '{actionCode}' not found. Using default.");
+				template = Configuration.MessageTemplates["PlayerScoreUpdate"];
+			}
 
-            if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-            {
-                SendDiscordMessage(globalMessage);
-            }
+			// Ensure attackerName is set
+			attackerName ??= GetPlayerName(userId);
 
-            LogEvent($"{participant.Name} received {points} point{pluralS} for {actionDescription}. Total score: {participant.Score}.");
-        }
+			// Set placeholders
+			var placeholders = new Dictionary<string, string>
+			{
+				{ "PlayerName", GetPlayerName(userId) },
+				{ "VictimName", victim?.displayName ?? "Unknown" },
+				{ "AttackerName", attackerName },
+				{ "EntityName", entityName },
+				{ "Score", points.ToString() },
+				{ "TotalScore", participant.Score.ToString() },
+				{ "Action", actionDescription },
+				{ "PluralS", pluralS }
+			};
+
+			// Generate final message
+			string globalMessage = FormatMessage(template, placeholders);
+			
+			// Send messages
+			SendTournamentMessage(globalMessage);
+			if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
+			{
+				SendDiscordMessage(globalMessage);
+			}
+
+			// Log event
+			LogEvent($"[Event] {participant.Name} received {points} point{pluralS} for {actionDescription}. New total score: {participant.Score}.");
+		}
 
         private string HistoryFile => $"{DataDirectory}/TournamentHistory.json";
 
