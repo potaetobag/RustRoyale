@@ -12,7 +12,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.1.1"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.1.2"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
     
@@ -25,15 +25,16 @@ namespace Oxide.Plugins
             public string ChatFormat { get; set; } = "[<color=#d97559>RustRoyale</color>] {message}";
             public string ChatIconSteamId { get; set; } = "76561199815164411";
             public string ChatUsername { get; set; } = "[RustRoyale]";
-            public bool AutoStartEnabled { get; set; } = true;
+            public string Timezone { get; set; } = "UTC";
             public string StartDay { get; set; } = "Friday";
+            public bool AutoStartEnabled { get; set; } = true;
+            public bool AutoEnrollEnabled { get; set; } = true;
             public int StartHour { get; set; } = 14;
             public int StartMinute { get; set; } = 0;
             public int DurationHours { get; set; } = 72;
             public int DataRetentionDays { get; set; } = 30; // Default to 30 days
             public int TopPlayersToTrack { get; set; } = 3; // Default to Top 3 players
             public List<int> NotificationIntervals { get; set; } = new List<int> { 600, 60 }; // Default: every 10 minutes (600 seconds) and last minute (60 seconds)
-            public string Timezone { get; set; } = "UTC"; // Default to UTC timezone
             public Dictionary<string, int> ScoreRules { get; set; } = new Dictionary<string, int>
             {
                 {"KILL", 3},     // Human player kills another human player
@@ -41,8 +42,10 @@ namespace Oxide.Plugins
                 {"JOKE", -1},    // Death by traps, self-inflicted damage
                 {"NPC", 1},      // Kill an NPC (Murderer, Zombie, Scientist, Scarecrow)
                 {"ENT", 5},      // Kill a Helicopter or Bradley Tank
-                {"BRUH", -2}     // Death by an NPC, Helicopter, or Bradley
+                {"BRUH", -2},     // Death by an NPC, Helicopter, or Bradley
+                {"WHY", 1}       // NEW: Award 1 point for killing an animal (wolf, boar, bear, stag, deer) from over Xm away
             };
+            public float AnimalKillDistance { get; set; } = 100f;
             public Dictionary<string, string> MessageTemplates { get; set; } = new Dictionary<string, string>
             {
                 {"StartTournament", "Brace yourselves, champions! The tournament has begun! Time to show off those pro skills (or hilarious fails). Time left: {TimeRemaining}. Duration: {Duration} hours."},
@@ -62,7 +65,7 @@ namespace Oxide.Plugins
                 {"KillPlayer", "{PlayerName} earned {Score} point{PluralS} for sending {VictimName} to respawn land! Total score: {TotalScore}."},
                 {"KilledByPlayer", "{VictimName} lost {Score} point{PluralS} for being killed by {AttackerName}. Total score: {TotalScore}. Better luck next time!"},
                 {"DeathByBRUH", "{PlayerName} lost {Score} point{PluralS} for getting defeated by {EntityName}. Total score: {TotalScore}. BRUH moment!"},
-
+                {"KillAnimal", "{PlayerName} earned {Score} point{PluralS} for killing an animal ({VictimName}) from over {Distance} meters away! Total score: {TotalScore}."},
                 {"NoTournamentRunning", "Hold your horses! There's no tournament right now. Next round starts in {TimeRemainingToStart}. Grab a snack meanwhile!"},
                 {"ParticipantsAndScores", "Scoreboard time! (Page {Page}/{TotalPages}): {PlayerList}. Who’s crushing it? Who’s just chilling?"},
                 {"NotInTournament", "Uh-oh! You’re not part of the tournament. Join in, don’t be shy!"},
@@ -259,7 +262,8 @@ namespace Oxide.Plugins
         private void Init()
         {
             permission.RegisterPermission(AdminPermission, this);
-            ValidateConfiguration(); // Ensures configuration integrity
+            ValidateConfiguration();
+            LoadAutoEnrollBlacklist();
             LoadParticipantsData();
             ScheduleTournament();
 
@@ -847,12 +851,19 @@ namespace Oxide.Plugins
 
             playerNameCache[player.userID] = player.displayName;
 
-            // Update participantsData dynamically
             if (participantsData.TryGetValue(player.userID, out var participant) && participant.Name == "Unknown")
             {
                 participant.Name = player.displayName;
                 SaveParticipantsData();
                 Puts($"Updated participant data: {player.userID} now has name '{player.displayName}'.");
+            }
+
+            if (Configuration.AutoEnrollEnabled && !autoEnrollBlacklist.Contains(player.userID) && !participantsData.ContainsKey(player.userID))
+            {
+                participantsData.TryAdd(player.userID, new PlayerStats(player.userID));
+                SaveParticipantsData();
+                SendPlayerMessage(player, "You have been automatically enrolled into the RustRoyale tournament system, you can opt out by entering /close_tournament.");
+                Puts($"[Debug] Automatically enrolled player: {player.displayName} ({player.userID})");
             }
         }
 
@@ -893,6 +904,12 @@ namespace Oxide.Plugins
 			string entityName = initiatorEntity?.ShortPrefabName ?? "Unknown";
 			ulong ownerId = initiatorEntity?.OwnerID ?? 0;
 			string ownerName = ownerId != 0 ? GetPlayerName(ownerId) : "None";
+            
+            bool IsAnimalKill(string prefabName)
+            {
+                var animals = new List<string> { "wolf", "boar", "bear", "stag", "deer" };
+                return animals.Contains(prefabName.ToLower());
+            }
 
 			Puts($"[Debug] Death event detected: Victim={victim.displayName} (Type={victim.ShortPrefabName}), Attacker={attackerName}, Entity={entityName}, Owner={ownerName}.");
 
@@ -1068,6 +1085,32 @@ namespace Oxide.Plugins
 			
 			    Puts($"[Debug] ❌ ENT Killed By Player Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
 			
+            // Handle Animals killed by player
+            if (victim.IsNpc && attacker != null && IsAnimalKill(victim.ShortPrefabName))
+            {
+                // Calculate the distance between attacker and victim
+                float distance = Vector3.Distance(attacker.transform.position, victim.transform.position);
+                // Use the configurable threshold from your configuration file
+                if (distance > Configuration.AnimalKillDistance)
+                {
+                    if (participants.Contains(attacker.userID) && Configuration.ScoreRules.TryGetValue("WHY", out int points))
+                    {
+                        Puts($"[Debug] Awarding {points} point for killing an animal ({victim.ShortPrefabName}) from {distance:F1} meters away to {attacker.displayName}.");
+                        UpdatePlayerScore(
+                            attacker.userID,
+                            "WHY",
+                            $"killing an animal ({victim.ShortPrefabName}) from over {Configuration.AnimalKillDistance} meters away",
+                            victim,
+                            info
+                        );
+                    }
+                    // Prevent further scoring for this event by returning immediately
+                    return;
+                }
+            }
+
+                Puts($"[Debug] ❌ Animal Killed By Player Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
+            
 			// Handle NPCs killed by player
 			if (victim.IsNpc && attacker != null)
 			{
@@ -1426,6 +1469,7 @@ namespace Oxide.Plugins
 				"NPC" => "KillNPC",
 				"ENT" => "KillEntity",
 				"BRUH" => "DeathByBRUH",
+                "WHY"  => "KillAnimal",
 				_ => "PlayerScoreUpdate"
 			};
 
@@ -1451,6 +1495,12 @@ namespace Oxide.Plugins
 				{ "Action", actionDescription },
 				{ "PluralS", pluralS }
 			};
+
+            // For animal kills, include the distance placeholder
+            if (actionCode == "WHY")
+            {
+                placeholders["Distance"] = Configuration.AnimalKillDistance.ToString();
+            }
 
 			// Generate final message
 			string globalMessage = FormatMessage(template, placeholders);
@@ -1535,6 +1585,42 @@ namespace Oxide.Plugins
             }
 
             LogEvent($"Announced winners: {string.Join(", ", topPlayers.Select(p => p.Name))}");
+        }
+
+    #endregion
+
+    #region Auto Enroll Handling
+
+        private HashSet<ulong> autoEnrollBlacklist = new HashSet<ulong>();
+        private string AutoEnrollBlacklistFile => $"{DataDirectory}/AutoEnrollBlacklist.json";
+
+        private void LoadAutoEnrollBlacklist()
+        {
+            try
+            {
+                if (File.Exists(AutoEnrollBlacklistFile))
+                {
+                    autoEnrollBlacklist = JsonConvert.DeserializeObject<HashSet<ulong>>(File.ReadAllText(AutoEnrollBlacklistFile)) ?? new HashSet<ulong>();
+                    Puts($"[Debug] Loaded {autoEnrollBlacklist.Count} auto-enroll blacklist entries.");
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Failed to load auto enroll blacklist: {ex.Message}");
+                autoEnrollBlacklist = new HashSet<ulong>();
+            }
+        }
+
+        private void SaveAutoEnrollBlacklist()
+        {
+            try
+            {
+                File.WriteAllText(AutoEnrollBlacklistFile, JsonConvert.SerializeObject(autoEnrollBlacklist, Formatting.Indented));
+            }
+            catch (Exception ex)
+            {
+                PrintWarning($"Failed to save auto enroll blacklist: {ex.Message}");
+            }
         }
 
     #endregion
@@ -1923,11 +2009,15 @@ namespace Oxide.Plugins
             // Check if the player is in participantsData
             if (participantsData.TryRemove(player.userID, out _))
             {
+                // Add player to auto-enroll blacklist so they are not auto-enrolled on rejoin
+                autoEnrollBlacklist.Add(player.userID);
+                SaveAutoEnrollBlacklist();
+
                 // Save updated participants data
                 SaveParticipantsData();
 
                 // Log successful removal
-                Puts($"[Debug] {player.displayName} ({player.userID}) removed from participantsData.");
+                Puts($"[Debug] {player.displayName} ({player.userID}) removed from participantsData and added to auto-enroll blacklist.");
 
                 // Notify the player they have opted out
                 string message = Configuration.MessageTemplates.TryGetValue("OptedOutTournament", out var optedOutTemplate)
