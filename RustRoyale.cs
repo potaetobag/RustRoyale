@@ -12,7 +12,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.1.3"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.1.4"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
     
@@ -310,23 +310,25 @@ namespace Oxide.Plugins
         }
 
         private void LogEvent(string message)
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(currentTournamentFile))
-                {
-                    PrintWarning("Tournament file has not been initialized. Call StartTournamentFile() first.");
-                    return;
-                    StartTournamentFile();
-                }
+		{
+			try
+			{
+				if (string.IsNullOrEmpty(currentTournamentFile))
+				{
+					PrintWarning("Tournament file has not been initialized. Calling StartTournamentFile()...");
+					StartTournamentFile();
 
-                File.AppendAllText(currentTournamentFile, $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff} - {message}\n");
-            }
-            catch (Exception ex)
-            {
-                PrintError($"Unexpected error while logging event: {ex.Message}\n{ex.StackTrace}");
-            }
-        }
+					// Optionally return here if you do NOT want to append on the same call
+					// return;
+				}
+
+				File.AppendAllText(currentTournamentFile, $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff} - {message}\n");
+			}
+			catch (Exception ex)
+			{
+				PrintError($"Unexpected error while logging event: {ex.Message}\n{ex.StackTrace}");
+			}
+		}
 
         private void ManageOldTournamentFiles()
         {
@@ -372,6 +374,17 @@ namespace Oxide.Plugins
             LogEvent(participantsLog);
         }
     #endregion
+	
+	#region On Start
+		private void OnServerInitialized()
+		{
+			// Ensure any already-connected players are recognized.
+			foreach (var player in BasePlayer.activePlayerList)
+			{
+				OnPlayerInit(player);
+			}
+		}
+	#endregion
 
     #region Schedule Tournament
         private readonly Dictionary<ulong, PlayerStats> playerStats = new Dictionary<ulong, PlayerStats>();
@@ -406,68 +419,35 @@ namespace Oxide.Plugins
         }
 
         private void ScheduleCountdown(DateTime targetTime, Action onCompletion)
-        {
-            TimeSpan timeUntilTarget = targetTime - DateTime.UtcNow;
+		{
+			TimeSpan timeUntilTarget = targetTime - DateTime.UtcNow;
 
-            if (timeUntilTarget.TotalSeconds <= 1.555)
-            {
-                Puts($"[Debug] Timer expired immediately for target: {targetTime}. Invoking completion.");
-                if (onCompletion != null)
-                {
-                    try
-                    {
-                        Puts("[Debug] Immediate invocation of onCompletion due to expired timer.");
-                        onCompletion.Invoke();
-                    }
-                    catch (Exception ex)
-                    {
-                        PrintError($"[Error] Exception during immediate onCompletion execution: {ex.Message}");
-                    }
-                }
-                else
-                {
-                    Puts("[Debug] onCompletion is null. Skipping invocation.");
-                }
-                return;
-            }
+			if (timeUntilTarget.TotalSeconds <= 1.0)
+			{
+				Puts($"[Debug] Timer expired immediately for target: {targetTime}. Invoking completion.");
+				onCompletion?.Invoke();
+				return;
+			}
 
-            Puts($"[Debug] Starting countdown timer for {timeUntilTarget.TotalSeconds} seconds.");
-            countdownTimer?.Destroy();
+			Puts($"[Debug] Starting open-ended countdown timer for about {timeUntilTarget.TotalSeconds:F1} seconds.");
+			countdownTimer?.Destroy();
 
-            int totalIterations = (int)Math.Ceiling(timeUntilTarget.TotalSeconds);
+			countdownTimer = timer.Every(1f, () =>
+			{
+				TimeSpan remainingTime = targetTime - DateTime.UtcNow;
+				
+				NotifyTournamentCountdown(remainingTime);
 
-            countdownTimer = timer.Repeat(1f, totalIterations, () =>
-            {
-                TimeSpan remainingTime = targetTime - DateTime.UtcNow;
+				if (remainingTime.TotalSeconds <= 1.0)
+				{
+					Puts("[Debug] Countdown timer expired; invoking completion.");
+					countdownTimer?.Destroy();
+					countdownTimer = null;
 
-                NotifyTournamentCountdown(remainingTime);
-
-                if (remainingTime.TotalSeconds <= 1.555)
-                {
-                    Puts("[Debug] Countdown timer expired; invoking completion.");
-                    countdownTimer?.Destroy();
-                    countdownTimer = null;
-
-                    if (onCompletion != null)
-                    {
-                        try
-                        {
-                            Puts("[Debug] Invoking onCompletion callback after timer expiration.");
-                            onCompletion.Invoke();
-                        }
-                        catch (Exception ex)
-                        {
-                            PrintError($"[Error] Exception during onCompletion execution: {ex.Message}");
-                        }
-                    }
-                    else
-                    {
-                        Puts("[Debug] onCompletion is null. Skipping invocation.");
-                    }
-                    return;
-                }
-            });
-        }
+					onCompletion?.Invoke();
+				}
+			});
+		}
 
         private void ScheduleTournament()
         {
@@ -574,7 +554,7 @@ namespace Oxide.Plugins
             }
             else
             {
-                Puts($"[Debug] No notification sent for {remainingSeconds}s remaining. Last notified: {lastNotifiedMinutes}s");
+                // Puts($"[Debug] No notification sent for {remainingSeconds}s remaining. Last notified: {lastNotifiedMinutes}s");
             }
         }
 
@@ -1774,63 +1754,122 @@ namespace Oxide.Plugins
 
     #region Kit Economy Integration
 
-        [HookMethod("CanRedeemKit")]
-        private object CanRedeemKit(BasePlayer player)
-        {
-            if (!pendingKitRedemptions.TryGetValue(player.userID, out string kitName))
-            {
-                return null;
-            }
-            
-            if (!Configuration.KitPrices.TryGetValue(kitName, out int kitPrice))
-            {
-                return "This kit is not available for purchase.";
-            }
-            
-            if (!participantsData.TryGetValue(player.userID, out var participant))
-            {
-                return "You are not enrolled in the tournament.";
-            }
-            
-            if (participant.Score < kitPrice)
-            {
-                SendPlayerMessage(player, $"You need {kitPrice} points to purchase the {kitName} kit, but you only have {participant.Score} points.");
-                return $"Insufficient points: You need {kitPrice} points to redeem this kit.";
-            }
-            
-            return null;
-        }
+		// [Newly Added] Chat command to purchase kits via points
+		[ChatCommand("buykit")]
+		private void BuyKitCommand(BasePlayer player, string command, string[] args)
+		{
+			// 1) Ensure player typed something like /buykit Bronze
+			if (args == null || args.Length == 0)
+			{
+				SendPlayerMessage(player, "Please specify which kit to buy. Usage: /buykit <KitName>");
+				return;
+			}
 
-        [HookMethod("OnKitRedeemed")]
-        private void OnKitRedeemed(BasePlayer player, string kitName)
-        {
-            // Remove the pending kit redemption for this player.
-            pendingKitRedemptions.Remove(player.userID);
-            
-            if (!Configuration.KitPrices.TryGetValue(kitName, out int kitPrice))
-            {
-                PrintWarning($"[KitsEconomy] No price defined for kit: {kitName}");
-                return;
-            }
-            
-            UpdatePlayerScore(player.userID, "PURCHASE_KIT", $"Purchased kit {kitName} for {kitPrice} points", null, null, null, "Kit Purchase");
-            
-            if (participantsData.TryGetValue(player.userID, out var participant))
-            {
-                var placeholders = new Dictionary<string, string>
-                {
-                    { "PlayerName", player.displayName },
-                    { "KitName", kitName },
-                    { "Price", kitPrice.ToString() },
-                    { "TotalPoints", participant.Score.ToString() }
-                };
-                
-                string message = FormatMessage(Configuration.MessageTemplates["KitPurchaseSuccess"], placeholders);
-                SendPlayerMessage(player, message);
-            }
-        }
+			string kitName = args[0];
 
-    #endregion
+			// 2) Check if this kit has a price set in your config
+			if (!Configuration.KitPrices.TryGetValue(kitName, out int kitPrice))
+			{
+				SendPlayerMessage(player, $"No such kit '{kitName}' or it has no price assigned.");
+				return;
+			}
+
+			// 3) Check if player is in the tournament
+			if (!participantsData.TryGetValue(player.userID, out var participant))
+			{
+				SendPlayerMessage(player, "You are not enrolled in the tournament. Use /open_tournament first.");
+				return;
+			}
+
+			// 4) Check if the player has enough points
+			if (participant.Score < kitPrice)
+			{
+				SendPlayerMessage(player, $"You need {kitPrice} points for the {kitName} kit, but you only have {participant.Score}.");
+				return;
+			}
+
+			// 5) Mark that this player is about to redeem the kit via /buykit
+			pendingKitRedemptions[player.userID] = kitName;
+
+			// 6) Actually call the Kits plugin to give them the kit
+			//    The Kits plugin should trigger CanRedeemKit -> OnKitRedeemed
+			Kits?.Call("GiveKit", player, kitName);
+		}
+
+		[HookMethod("CanRedeemKit")]
+		private object CanRedeemKit(BasePlayer player)
+		{
+			// If the player didn't use /buykit first, we won't have recorded their pending redemption
+			if (!pendingKitRedemptions.TryGetValue(player.userID, out string kitName))
+			{
+				// Return a string to block direct usage of /kit, forcing use of /buykit
+				return "You must purchase kits using /buykit <KitName>.";
+			}
+			
+			// Check if kit price is defined in your configuration
+			if (!Configuration.KitPrices.TryGetValue(kitName, out int kitPrice))
+			{
+				return "This kit is not available for purchase.";
+			}
+			
+			// Check if the player is in the tournament
+			if (!participantsData.TryGetValue(player.userID, out var participant))
+			{
+				return "You are not enrolled in the tournament.";
+			}
+			
+			// Check if the player has enough points
+			if (participant.Score < kitPrice)
+			{
+				SendPlayerMessage(player, $"You need {kitPrice} points to purchase the {kitName} kit, but you only have {participant.Score} points.");
+				return $"Insufficient points: You need {kitPrice} points to redeem this kit.";
+			}
+			
+			// If we get here, it's all good
+			return null;
+		}
+
+		[HookMethod("OnKitRedeemed")]
+		private void OnKitRedeemed(BasePlayer player, string kitName)
+		{
+			// Remove the pending kit redemption for this player
+			pendingKitRedemptions.Remove(player.userID);
+			
+			// Confirm the kit price again (in case of config mismatch)
+			if (!Configuration.KitPrices.TryGetValue(kitName, out int kitPrice))
+			{
+				PrintWarning($"[KitsEconomy] No price defined for kit: {kitName}");
+				return;
+			}
+			
+			// Deduct the price from the player’s tournament score
+			UpdatePlayerScore(
+				player.userID,
+				"PURCHASE_KIT",
+				$"Purchased kit {kitName} for {kitPrice} points",
+				null,
+				null,
+				null,
+				"Kit Purchase"
+			);
+			
+			// Announce success and show final score
+			if (participantsData.TryGetValue(player.userID, out var participant))
+			{
+				var placeholders = new Dictionary<string, string>
+				{
+					{ "PlayerName", player.displayName },
+					{ "KitName", kitName },
+					{ "Price", kitPrice.ToString() },
+					{ "TotalPoints", participant.Score.ToString() }
+				};
+				
+				string message = FormatMessage(Configuration.MessageTemplates["KitPurchaseSuccess"], placeholders);
+				SendPlayerMessage(player, message);
+			}
+		}
+
+		#endregion
 
     #region Commands
         
