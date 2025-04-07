@@ -12,7 +12,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.1.4"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.1.5"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
     
@@ -29,9 +29,9 @@ namespace Oxide.Plugins
             public string StartDay { get; set; } = "Friday";
             public bool AutoStartEnabled { get; set; } = true;
             public bool AutoEnrollEnabled { get; set; } = true;
-            public int StartHour { get; set; } = 14;
+            public int StartHour { get; set; } = 12;
             public int StartMinute { get; set; } = 0;
-            public int DurationHours { get; set; } = 72;
+            public int DurationHours { get; set; } = 125;
             public int DataRetentionDays { get; set; } = 30; // Default to 30 days
             public int TopPlayersToTrack { get; set; } = 3; // Default to Top 3 players
             public List<int> NotificationIntervals { get; set; } = new List<int> { 600, 60 }; // Default: every 10 minutes (600 seconds) and last minute (60 seconds)
@@ -83,10 +83,10 @@ namespace Oxide.Plugins
             };
             public Dictionary<string, int> KitPrices { get; set; } = new Dictionary<string, int>
             {
-                {"Starter", 20},
-                {"Bronze", 40},
-                {"Silver", 60},
-                {"Gold", 80},
+                {"Starter", 2},
+                {"Bronze", 15},
+                {"Silver", 25},
+                {"Gold", 75},
                 {"Platinum", 100}
             };
 
@@ -390,6 +390,7 @@ namespace Oxide.Plugins
         private readonly Dictionary<ulong, PlayerStats> playerStats = new Dictionary<ulong, PlayerStats>();
         private readonly HashSet<ulong> participants = new HashSet<ulong>();
         private readonly HashSet<ulong> openTournamentPlayers = new HashSet<ulong>();
+		private readonly HashSet<ulong> inactiveParticipants = new HashSet<ulong>();
         private bool isTournamentRunning = false;
         private DateTime tournamentStartTime;
         private DateTime tournamentEndTime;
@@ -641,6 +642,13 @@ namespace Oxide.Plugins
         private void StartTournament()
         {
             Puts("[Debug] StartTournament invoked.");
+			
+			participants.Clear();
+			foreach (var participant in participantsData.Keys)
+			{
+				participants.Add(participant);
+			}
+			Puts("[Debug] Participants HashSet rebuilt for new tournament.");
 
             StartTournamentFile();
 
@@ -798,27 +806,34 @@ namespace Oxide.Plugins
         }
 
         private void OnPlayerInit(BasePlayer player)
-        {
-            if (player == null || string.IsNullOrEmpty(player.displayName))
-                return;
+		{
+			if (player == null || string.IsNullOrEmpty(player.displayName))
+				return;
 
-            playerNameCache[player.userID] = player.displayName;
+			playerNameCache[player.userID] = player.displayName;
 
-            if (participantsData.TryGetValue(player.userID, out var participant) && participant.Name == "Unknown")
-            {
-                participant.Name = player.displayName;
-                SaveParticipantsData();
-                Puts($"Updated participant data: {player.userID} now has name '{player.displayName}'.");
-            }
+			if (participantsData.TryGetValue(player.userID, out var participant) && participant.Name == "Unknown")
+			{
+				participant.Name = player.displayName;
+				SaveParticipantsData();
+				Puts($"Updated participant data: {player.userID} now has name '{player.displayName}'.");
+			}
 
-            if (Configuration.AutoEnrollEnabled && !autoEnrollBlacklist.Contains(player.userID) && !participantsData.ContainsKey(player.userID))
-            {
-                participantsData.TryAdd(player.userID, new PlayerStats(player.userID));
-                SaveParticipantsData();
-                SendPlayerMessage(player, "You have been automatically enrolled into the RustRoyale tournament system, you can opt out by entering /close_tournament.");
-                Puts($"[Debug] Automatically enrolled player: {player.displayName} ({player.userID})");
-            }
-        }
+			if (Configuration.AutoEnrollEnabled && !autoEnrollBlacklist.Contains(player.userID) && !participantsData.ContainsKey(player.userID))
+			{
+				participantsData.TryAdd(player.userID, new PlayerStats(player.userID));
+
+				if (isTournamentRunning)
+				{
+					participants.Add(player.userID); // <-- PATCH: add player to active participants
+					Puts($"[Debug] {player.displayName} was auto-enrolled and added to active tournament participants.");
+				}
+
+				SaveParticipantsData();
+				SendPlayerMessage(player, "You have been automatically enrolled into the RustRoyale tournament system, you can opt out by entering /close_tournament.");
+				Puts($"[Debug] Automatically enrolled player: {player.displayName} ({player.userID})");
+			}
+		}
 
         private void OnPlayerDisconnected(BasePlayer player)
         {
@@ -1361,6 +1376,12 @@ namespace Oxide.Plugins
         private void UpdatePlayerScore(ulong userId, string actionCode, string actionDescription, BasePlayer victim = null, HitInfo info = null, string attackerName = null, string entityName = "Unknown", bool reverseMessage = false)
 		{
 			Puts($"[Debug] UpdatePlayerScore called for UserID={userId}, ActionCode={actionCode}, Victim={victim?.displayName ?? "None"}, Entity={entityName}");
+			
+			if (inactiveParticipants.Contains(userId))
+			{
+				Puts($"[Debug] Skipping score update: {userId} is inactive.");
+				return;
+			}
 
 			if (!participantsData.TryGetValue(userId, out var participant))
 			{
@@ -1834,28 +1855,23 @@ namespace Oxide.Plugins
 		{
 			// Remove the pending kit redemption for this player
 			pendingKitRedemptions.Remove(player.userID);
-			
+
 			// Confirm the kit price again (in case of config mismatch)
 			if (!Configuration.KitPrices.TryGetValue(kitName, out int kitPrice))
 			{
 				PrintWarning($"[KitsEconomy] No price defined for kit: {kitName}");
 				return;
 			}
-			
-			// Deduct the price from the player’s tournament score
-			UpdatePlayerScore(
-				player.userID,
-				"PURCHASE_KIT",
-				$"Purchased kit {kitName} for {kitPrice} points",
-				null,
-				null,
-				null,
-				"Kit Purchase"
-			);
-			
-			// Announce success and show final score
+
+			// Deduct the points manually
 			if (participantsData.TryGetValue(player.userID, out var participant))
 			{
+				int previousScore = participant.Score;
+				participant.Score -= kitPrice;
+				SaveParticipantsData();
+
+				Puts($"[Debug] {participant.Name} purchased {kitName} kit. Points deducted: {kitPrice}. New Score: {participant.Score}");
+
 				var placeholders = new Dictionary<string, string>
 				{
 					{ "PlayerName", player.displayName },
@@ -1863,13 +1879,15 @@ namespace Oxide.Plugins
 					{ "Price", kitPrice.ToString() },
 					{ "TotalPoints", participant.Score.ToString() }
 				};
-				
+
 				string message = FormatMessage(Configuration.MessageTemplates["KitPurchaseSuccess"], placeholders);
 				SendPlayerMessage(player, message);
+
+				LogEvent($"{participant.Name} purchased kit {kitName} for {kitPrice} points. Previous Score: {previousScore}, New Score: {participant.Score}");
 			}
 		}
 
-		#endregion
+	#endregion
 
     #region Commands
         
@@ -1998,7 +2016,14 @@ namespace Oxide.Plugins
                 return;
             }
 
-            participantsData[player.userID] = new PlayerStats(player.userID);
+            if (participantsData.ContainsKey(player.userID))
+			{
+				inactiveParticipants.Remove(player.userID);
+			}
+			else
+			{
+				participantsData[player.userID] = new PlayerStats(player.userID);
+			}
 
             if (!openTournamentPlayers.Contains(player.userID))
             {
@@ -2022,14 +2047,14 @@ namespace Oxide.Plugins
         [ChatCommand("close_tournament")]
         private void CloseTournamentCommand(BasePlayer player, string command, string[] args)
         {
-            if (participantsData.TryRemove(player.userID, out _))
+            if (participantsData.ContainsKey(player.userID))
             {
-                autoEnrollBlacklist.Add(player.userID);
+                inactiveParticipants.Add(player.userID);
+				autoEnrollBlacklist.Add(player.userID);
                 SaveAutoEnrollBlacklist();
-
                 SaveParticipantsData();
 
-                Puts($"[Debug] {player.displayName} ({player.userID}) removed from participantsData and added to auto-enroll blacklist.");
+                Puts($"[Debug] {player.displayName} ({player.userID}) marked inactive from participantsData and added to auto-enroll blacklist.");
 
                 string message = Configuration.MessageTemplates.TryGetValue("OptedOutTournament", out var optedOutTemplate)
                     ? FormatMessage(optedOutTemplate, new Dictionary<string, string>
