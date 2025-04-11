@@ -12,7 +12,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.1.5"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.1.7"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
     
@@ -29,6 +29,8 @@ namespace Oxide.Plugins
             public string StartDay { get; set; } = "Friday";
             public bool AutoStartEnabled { get; set; } = true;
             public bool AutoEnrollEnabled { get; set; } = true;
+            public bool PenaltyOnExitEnabled { get; set; } = true; // Default enabled
+            public int PenaltyPointsOnExit { get; set; } = 25;      // Default -25 points
             public int StartHour { get; set; } = 12;
             public int StartMinute { get; set; } = 0;
             public int DurationHours { get; set; } = 125;
@@ -79,7 +81,8 @@ namespace Oxide.Plugins
                 {"TournamentAlreadyRunning", "Whoa there! A tournament is already underway. Time left: {TimeRemaining}. Jump in or cheer from the sidelines!"},
                 {"NoScores", "No scores available yet. Join the tournament and make some history!"},
                 {"TournamentAboutToStart", "The tournament is about to start! Opt-in now to participate."},
-                {"TournamentCountdown", "Tournament starting soon! {Time} left to join."}
+                {"TournamentCountdown", "Tournament starting soon! {Time} left to join."},
+				{"LeaveTournamentPenalty", "{PlayerName} left the tournament and lost {PenaltyPoints} points!"}
             };
             public Dictionary<string, int> KitPrices { get; set; } = new Dictionary<string, int>
             {
@@ -462,8 +465,10 @@ namespace Oxide.Plugins
             {
                 DayOfWeek startDay = Enum.Parse<DayOfWeek>(Configuration.StartDay, true);
                 DateTime now = DateTime.UtcNow;
+				Puts($"[Debug] The server thinks it's currently {now:yyyy-MM-dd HH:mm:ss} UTC.");
                 DateTime localNow = GetLocalTime(now);
-
+				Puts($"[Debug] localNow is {localNow:yyyy-MM-dd HH:mm:ss} (Timezone={Configuration.Timezone}).");
+				
                 DateTime nextStart = localNow
                 .AddDays((7 + (int)startDay - (int)localNow.DayOfWeek) % 7)
                 .Date
@@ -1918,87 +1923,114 @@ namespace Oxide.Plugins
         }
 
         [ChatCommand("enter_tournament")]
-        private void EnterTournamentCommand(BasePlayer player, string command, string[] args)
-        {
-            if (isTournamentRunning)
-            {
-                string message = Configuration.MessageTemplates.TryGetValue("TournamentAlreadyRunning", out var template)
-                    ? FormatMessage(template, new Dictionary<string, string>
-                    {
-                        { "TimeRemaining", FormatTimeRemaining(tournamentEndTime - DateTime.UtcNow) },
-                        { "PlayerName", player.displayName }
-                    })
-                    : "A tournament is already underway. You cannot join now.";
-                SendPlayerMessage(player, message);
-                return;
-            }
+		private void EnterTournamentCommand(BasePlayer player, string command, string[] args)
+		{
+			if (participantsData.TryGetValue(player.userID, out var existingParticipant))
+			{
+				if (inactiveParticipants.Contains(player.userID))
+				{
+					// Player had left before; reactivate them
+					inactiveParticipants.Remove(player.userID);
 
-            if (participantsData.TryAdd(player.userID, new PlayerStats(player.userID)))
-            {
-                SaveParticipantsData();
+					string message = $"{player.displayName}, you have rejoined the tournament! Your previous score has been restored.";
+					SendPlayerMessage(player, message);
+					LogEvent($"{player.displayName} rejoined the tournament with existing score: {existingParticipant.Score}.");
+				}
+				else
+				{
+					// Already active
+					string message = Configuration.MessageTemplates.TryGetValue("AlreadyParticipating", out var alreadyTemplate)
+						? FormatMessage(alreadyTemplate, new Dictionary<string, string>
+						{
+							{ "PlayerName", player.displayName }
+						})
+						: $"{player.displayName}, you are already in the tournament.";
+					SendPlayerMessage(player, message);
+				}
+			}
+			else
+			{
+				// First time joining
+				var newParticipant = new PlayerStats(player.userID) { Name = player.displayName };
+				participantsData[player.userID] = newParticipant;
+				SaveParticipantsData();
 
-                string message = Configuration.MessageTemplates.TryGetValue("JoinTournament", out var joinTemplate)
-                    ? FormatMessage(joinTemplate, new Dictionary<string, string>
-                    {
-                        { "PlayerName", player.displayName }
-                    })
-                    : $"{player.displayName} has joined the tournament.";
-                SendPlayerMessage(player, message);
+				string message = Configuration.MessageTemplates.TryGetValue("JoinTournament", out var joinTemplate)
+					? FormatMessage(joinTemplate, new Dictionary<string, string>
+					{
+						{ "PlayerName", player.displayName }
+					})
+					: $"{player.displayName} has joined the tournament.";
+				
+				SendTournamentMessage(message);
+				
+				if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
+				{
+					SendDiscordMessage(message);
+				}
 
-                LogEvent($"{player.displayName} joined the current tournament.");
-            }
-            else
-            {
-                string message = Configuration.MessageTemplates.TryGetValue("AlreadyParticipating", out var alreadyTemplate)
-                    ? FormatMessage(alreadyTemplate, new Dictionary<string, string>
-                    {
-                        { "PlayerName", player.displayName }
-                    })
-                    : $"{player.displayName}, you are already in the tournament.";
-                SendPlayerMessage(player, message);
-            }
-        }
+				LogEvent($"{player.displayName} joined the tournament as a new participant.");
+			}
+
+			// Always ensure they are in the active participants set
+			participants.Add(player.userID);
+		}
 
         [ChatCommand("exit_tournament")]
-        private void ExitTournamentCommand(BasePlayer player, string command, string[] args)
-        {
-            if (isTournamentRunning)
-            {
-                string message = Configuration.MessageTemplates.TryGetValue("TournamentRunningCannotExit", out var template)
-                    ? FormatMessage(template, new Dictionary<string, string>
-                    {
-                        { "PlayerName", player.displayName }
-                    })
-                    : $"{player.displayName}, you cannot exit the tournament while it is running.";
-                SendPlayerMessage(player, message);
-                return;
-            }
+		private void ExitTournamentCommand(BasePlayer player, string command, string[] args)
+		{
+			if (!participantsData.TryGetValue(player.userID, out var participant))
+			{
+				string message = Configuration.MessageTemplates.TryGetValue("NotInTournament", out var notInTemplate)
+					? FormatMessage(notInTemplate, new Dictionary<string, string>
+					{
+						{ "PlayerName", player.displayName }
+					})
+					: $"{player.displayName}, you are not part of the tournament.";
+				SendPlayerMessage(player, message);
+				return;
+			}
 
-            if (participantsData.TryRemove(player.userID, out _))
-            {
-                SaveParticipantsData();
+			inactiveParticipants.Add(player.userID);
+			participants.Remove(player.userID);
 
-                string message = Configuration.MessageTemplates.TryGetValue("LeaveTournament", out var template)
-                    ? FormatMessage(template, new Dictionary<string, string>
-                    {
-                        { "PlayerName", player.displayName }
-                    })
-                    : $"{player.displayName} has left the tournament.";
-                SendPlayerMessage(player, message);
+			int previousScore = participant.Score;
 
-                LogEvent($"{player.displayName} left the tournament.");
-            }
-            else
-            {
-                string message = Configuration.MessageTemplates.TryGetValue("NotInTournament", out var template)
-                    ? FormatMessage(template, new Dictionary<string, string>
-                    {
-                        { "PlayerName", player.displayName }
-                    })
-                    : $"{player.displayName}, you are not part of the tournament.";
-                SendPlayerMessage(player, message);
-            }
-        }
+			string leaveMessage;
+
+			if (Configuration.PenaltyOnExitEnabled)
+			{
+				int penaltyAmount = Configuration.PenaltyPointsOnExit;
+				participant.Score -= penaltyAmount;
+
+				Puts($"[Debug] {player.displayName} was penalized {penaltyAmount} points for exiting. Previous Score: {previousScore}, New Score: {participant.Score}");
+				LogEvent($"{player.displayName} left the tournament and was penalized {penaltyAmount} points (from {previousScore} to {participant.Score}).");
+
+				// Use the LeaveTournamentPenalty message
+				leaveMessage = Configuration.MessageTemplates.TryGetValue("LeaveTournamentPenalty", out var penaltyTemplate)
+					? FormatMessage(penaltyTemplate, new Dictionary<string, string>
+					{
+						{ "PlayerName", player.displayName },
+						{ "PenaltyPoints", penaltyAmount.ToString() }
+					})
+					: $"{player.displayName} left the tournament and lost {penaltyAmount} points!";
+			}
+			else
+			{
+				LogEvent($"{player.displayName} left the tournament (no penalty applied).");
+
+				leaveMessage = Configuration.MessageTemplates.TryGetValue("LeaveTournament", out var leaveTemplate)
+					? FormatMessage(leaveTemplate, new Dictionary<string, string>
+					{
+						{ "PlayerName", player.displayName }
+					})
+					: $"{player.displayName} has left the tournament.";
+			}
+
+			SaveParticipantsData();
+
+			SendPlayerMessage(player, leaveMessage);
+		}
 
         [ChatCommand("open_tournament")]
         private void OpenTournamentCommand(BasePlayer player, string command, string[] args)
