@@ -12,7 +12,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.1.7"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.1.8"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
     
@@ -29,8 +29,8 @@ namespace Oxide.Plugins
             public string StartDay { get; set; } = "Friday";
             public bool AutoStartEnabled { get; set; } = true;
             public bool AutoEnrollEnabled { get; set; } = true;
-            public bool PenaltyOnExitEnabled { get; set; } = true; // Default enabled
-            public int PenaltyPointsOnExit { get; set; } = 25;      // Default -25 points
+			public bool PenaltyOnExitEnabled { get; set; } = true; // Default enabled
+			public int PenaltyPointsOnExit { get; set; } = 25;      // Default -25 points
             public int StartHour { get; set; } = 12;
             public int StartMinute { get; set; } = 0;
             public int DurationHours { get; set; } = 125;
@@ -394,6 +394,8 @@ namespace Oxide.Plugins
         private readonly HashSet<ulong> participants = new HashSet<ulong>();
         private readonly HashSet<ulong> openTournamentPlayers = new HashSet<ulong>();
 		private readonly HashSet<ulong> inactiveParticipants = new HashSet<ulong>();
+		private Dictionary<ulong, (BasePlayer Attacker, float TimeStamp)> lastDamageRecords 
+			= new Dictionary<ulong, (BasePlayer Attacker, float TimeStamp)>();
         private bool isTournamentRunning = false;
         private DateTime tournamentStartTime;
         private DateTime tournamentEndTime;
@@ -482,6 +484,15 @@ namespace Oxide.Plugins
 
                 tournamentStartTime = GetUtcTime(nextStart);
                 LogEvent($"Tournament scheduled to start on {GetLocalTime(tournamentStartTime):yyyy-MM-dd HH:mm:ss} ({Configuration.Timezone}).");
+				
+				int activeCount = participantsData.Keys.Where(id => !inactiveParticipants.Contains(id)).Count();
+				string startTimeLocal = GetLocalTime(tournamentStartTime).ToString("yyyy-MM-dd HH:mm:ss");
+				string scheduleMessage = $"Heads up, warriors! The tournament kicks off at {startTimeLocal} ({Configuration.Timezone}) and will rage for {Configuration.DurationHours} hours. Already, {activeCount} heroes have signed up to battle it out. If you’re not in yet, type /open_tournament and join the fray!";
+				SendTournamentMessage(scheduleMessage);
+				if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
+				{
+					SendDiscordMessage(scheduleMessage);
+				}
 
                 ScheduleCountdown(tournamentStartTime, () =>
                 {
@@ -851,6 +862,14 @@ namespace Oxide.Plugins
         private readonly ConcurrentDictionary<ulong, DateTime> recentDeaths = new ConcurrentDictionary<ulong, DateTime>();
         private const int RecentDeathWindowSeconds = 5;
 
+		private void OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
+		{
+			if (entity is BasePlayer victim && info != null && info.InitiatorPlayer != null)
+			{
+				lastDamageRecords[victim.userID] = (info.InitiatorPlayer, UnityEngine.Time.realtimeSinceStartup);
+			}
+		}
+
 		private void OnPlayerDeath(BasePlayer victim, HitInfo info)
 		{
 			if (!isTournamentRunning || victim == null)
@@ -871,6 +890,24 @@ namespace Oxide.Plugins
 			recentDeaths[victim.userID] = DateTime.UtcNow;
 
 			var attacker = info?.InitiatorPlayer;
+			
+			// Check if attacker is null (like bleed/burn) or the victim themself,
+			// then try to see if we recorded a "last real attacker" recently.
+			if (attacker == null || attacker == victim)
+			{
+				if (lastDamageRecords.TryGetValue(victim.userID, out var record))
+				{
+					float timeSinceLastHit = UnityEngine.Time.realtimeSinceStartup - record.TimeStamp;
+
+					// If the last real hit was within 30 seconds, override
+					if (timeSinceLastHit <= 30f)
+					{
+						attacker = record.Attacker;
+						Puts($"[Debug] Overriding final attacker with last real attacker: {attacker?.displayName}");
+					}
+				}
+			}
+
 			var initiatorEntity = info?.Initiator as BaseCombatEntity;
 
 			string attackerName = attacker?.displayName ?? "Unknown";
@@ -879,10 +916,13 @@ namespace Oxide.Plugins
 			string ownerName = ownerId != 0 ? GetPlayerName(ownerId) : "None";
             
             bool IsAnimalKill(string prefabName)
-            {
-                var animals = new List<string> { "wolf", "boar", "bear", "stag", "deer" };
-                return animals.Contains(prefabName.ToLower());
-            }
+			{
+				var animals = new List<string> { "wolf", "boar", "bear", "stag", "deer", "chicken" };
+				string lower = prefabName.ToLower();
+				
+				// Return true if the prefab name includes any known animal substring
+				return animals.Any(animal => lower.Contains(animal));
+			}
 
 			Puts($"[Debug] Death event detected: Victim={victim.displayName} (Type={victim.ShortPrefabName}), Attacker={attackerName}, Entity={entityName}, Owner={ownerName}.");
 
@@ -1191,6 +1231,8 @@ namespace Oxide.Plugins
             }
 			
 			    Puts($"[Debug] ❌ Player Kills Player Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
+
+			lastDamageRecords.Remove(victim.userID);
 
         }
 
@@ -1709,35 +1751,25 @@ namespace Oxide.Plugins
         }
 
         private void SendTournamentMessage(string message)
-        {
-            if (string.IsNullOrEmpty(message))
-            {
-                PrintWarning("[SendTournamentMessage] Attempted to send an empty or null message.");
-                return;
-            }
+		{
+			if (string.IsNullOrEmpty(message))
+			{
+				PrintWarning("[SendTournamentMessage] Attempted to send an empty or null message.");
+				return;
+			}
 
-            Puts($"[Debug] Sending tournament message: {message}");
+			Puts($"[Debug] Sending tournament message: {message}");
 
-            foreach (var player in BasePlayer.activePlayerList)
-            {
-                if (player == null || !player.IsConnected)
-                {
-                    PrintWarning($"[SendTournamentMessage] Skipping player: {player?.displayName ?? "Unknown"} (Disconnected or null)");
-                    continue;
-                }
-
-                try
-                {
-                    string formattedMessage = Configuration.ChatFormat.Replace("{message}", message);
-
-                    Server.Broadcast(formattedMessage, ulong.Parse(Configuration.ChatIconSteamId));
-                }
-                catch (Exception ex)
-                {
-                    PrintError($"[SendTournamentMessage] Error sending message to player {player.displayName}: {ex.Message}");
-                }
-            }
-        }
+			try
+			{
+				string formattedMessage = Configuration.ChatFormat.Replace("{message}", message);
+				Server.Broadcast(formattedMessage, ulong.Parse(Configuration.ChatIconSteamId));
+			}
+			catch (Exception ex)
+			{
+				PrintError($"[SendTournamentMessage] Error sending message to all players: {ex.Message}");
+			}
+		}
 
         private void SendDiscordMessage(string content)
         {
@@ -1780,65 +1812,16 @@ namespace Oxide.Plugins
 
     #region Kit Economy Integration
 
-		// [Newly Added] Chat command to purchase kits via points
-		[ChatCommand("buykit")]
-		private void BuyKitCommand(BasePlayer player, string command, string[] args)
-		{
-			// 1) Ensure player typed something like /buykit Bronze
-			if (args == null || args.Length == 0)
-			{
-				SendPlayerMessage(player, "Please specify which kit to buy. Usage: /buykit <KitName>");
-				return;
-			}
-
-			string kitName = args[0];
-
-			// 2) Check if this kit has a price set in your config
-			if (!Configuration.KitPrices.TryGetValue(kitName, out int kitPrice))
-			{
-				SendPlayerMessage(player, $"No such kit '{kitName}' or it has no price assigned.");
-				return;
-			}
-
-			// 3) Check if player is in the tournament
-			if (!participantsData.TryGetValue(player.userID, out var participant))
-			{
-				SendPlayerMessage(player, "You are not enrolled in the tournament. Use /open_tournament first.");
-				return;
-			}
-
-			// 4) Check if the player has enough points
-			if (participant.Score < kitPrice)
-			{
-				SendPlayerMessage(player, $"You need {kitPrice} points for the {kitName} kit, but you only have {participant.Score}.");
-				return;
-			}
-
-			// 5) Mark that this player is about to redeem the kit via /buykit
-			pendingKitRedemptions[player.userID] = kitName;
-
-			// 6) Actually call the Kits plugin to give them the kit
-			//    The Kits plugin should trigger CanRedeemKit -> OnKitRedeemed
-			Kits?.Call("GiveKit", player, kitName);
-		}
-
 		[HookMethod("CanRedeemKit")]
-		private object CanRedeemKit(BasePlayer player)
+		private object CanRedeemKit(BasePlayer player, string kitName)
 		{
-			// If the player didn't use /buykit first, we won't have recorded their pending redemption
-			if (!pendingKitRedemptions.TryGetValue(player.userID, out string kitName))
-			{
-				// Return a string to block direct usage of /kit, forcing use of /buykit
-				return "You must purchase kits using /buykit <KitName>.";
-			}
-			
 			// Check if kit price is defined in your configuration
 			if (!Configuration.KitPrices.TryGetValue(kitName, out int kitPrice))
 			{
 				return "This kit is not available for purchase.";
 			}
 			
-			// Check if the player is in the tournament
+			// Check if the player is enrolled in the tournament
 			if (!participantsData.TryGetValue(player.userID, out var participant))
 			{
 				return "You are not enrolled in the tournament.";
@@ -1847,20 +1830,16 @@ namespace Oxide.Plugins
 			// Check if the player has enough points
 			if (participant.Score < kitPrice)
 			{
-				SendPlayerMessage(player, $"You need {kitPrice} points to purchase the {kitName} kit, but you only have {participant.Score} points.");
-				return $"Insufficient points: You need {kitPrice} points to redeem this kit.";
+				return $"You need {kitPrice} points to purchase the {kitName} kit, but you only have {participant.Score} points.";
 			}
 			
-			// If we get here, it's all good
+			// All checks pass—allow kit redemption.
 			return null;
 		}
 
 		[HookMethod("OnKitRedeemed")]
 		private void OnKitRedeemed(BasePlayer player, string kitName)
 		{
-			// Remove the pending kit redemption for this player
-			pendingKitRedemptions.Remove(player.userID);
-
 			// Confirm the kit price again (in case of config mismatch)
 			if (!Configuration.KitPrices.TryGetValue(kitName, out int kitPrice))
 			{
@@ -1868,7 +1847,7 @@ namespace Oxide.Plugins
 				return;
 			}
 
-			// Deduct the points manually
+			// Deduct the points manually from the player's tournament score.
 			if (participantsData.TryGetValue(player.userID, out var participant))
 			{
 				int previousScore = participant.Score;
