@@ -12,7 +12,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.1.8"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.1.9"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
     
@@ -36,6 +36,7 @@ namespace Oxide.Plugins
             public int DurationHours { get; set; } = 125;
             public int DataRetentionDays { get; set; } = 30; // Default to 30 days
             public int TopPlayersToTrack { get; set; } = 3; // Default to Top 3 players
+			public int JoinCutoffHours  { get; set; } = 6;   // 0 = no late‑join cut‑off
             public List<int> NotificationIntervals { get; set; } = new List<int> { 600, 60 }; // Default: every 10 minutes (600 seconds) and last minute (60 seconds)
             public Dictionary<string, int> ScoreRules { get; set; } = new Dictionary<string, int>
             {
@@ -45,7 +46,7 @@ namespace Oxide.Plugins
                 {"NPC", 1},      // Kill an NPC (Murderer, Zombie, Scientist, Scarecrow)
                 {"ENT", 5},      // Kill a Helicopter or Bradley Tank
                 {"BRUH", -2},    // Death by an NPC, Helicopter, or Bradley
-                {"WHY", 1}       // Award points for killing an animal (wolf, boar, bear, stag, deer) from over Xm away
+                {"WHY", 5}       // Award points for killing an animal (wolf, boar, bear, stag, deer) from over Xm away
             };
             public float AnimalKillDistance { get; set; } = 100f;
             public Dictionary<string, string> MessageTemplates { get; set; } = new Dictionary<string, string>
@@ -86,9 +87,9 @@ namespace Oxide.Plugins
             };
             public Dictionary<string, int> KitPrices { get; set; } = new Dictionary<string, int>
             {
-                {"Starter", 2},
-                {"Bronze", 15},
-                {"Silver", 25},
+                {"Starter", 5},
+                {"Bronze", 25},
+                {"Silver", 50},
                 {"Gold", 75},
                 {"Platinum", 100}
             };
@@ -184,6 +185,16 @@ namespace Oxide.Plugins
                 Configuration.NotificationIntervals = Configuration.NotificationIntervals.Where(interval => interval > 0).ToList();
                 updated = true;
             }
+			
+			if (Configuration.JoinCutoffHours < 0 ||
+				Configuration.JoinCutoffHours > Configuration.DurationHours)
+			{
+				PrintWarning($"JoinCutoffHours was {Configuration.JoinCutoffHours}; " +
+							 $"must be between 0 and DurationHours ({Configuration.DurationHours}). " +
+							 $"Defaulting to 6.");
+				Configuration.JoinCutoffHours = 6;
+				updated = true;
+			}
 
             if (updated)
             {
@@ -266,6 +277,7 @@ namespace Oxide.Plugins
         {
             permission.RegisterPermission(AdminPermission, this);
             ValidateConfiguration();
+			NormaliseKitPrices();
             LoadAutoEnrollBlacklist();
             LoadParticipantsData();
             ScheduleTournament();
@@ -402,9 +414,13 @@ namespace Oxide.Plugins
         private Timer countdownTimer;
 
         private bool IsWithinCutoffPeriod()
-        {
-            return isTournamentRunning && DateTime.UtcNow < tournamentStartTime.AddHours(6);
-        }
+		{
+			// 0 → no limit at all
+			if (Configuration.JoinCutoffHours == 0) return true;
+
+			return isTournamentRunning &&
+				   DateTime.UtcNow < tournamentStartTime.AddHours(Configuration.JoinCutoffHours);
+		}
 
         private string FormatTimeRemaining(TimeSpan timeSpan)
         {
@@ -656,170 +672,135 @@ namespace Oxide.Plugins
         }
 
         private void StartTournament()
-        {
-            Puts("[Debug] StartTournament invoked.");
+		{
+			Puts("[Debug] StartTournament invoked.");
 			
+			// Rebuild in‐memory "participants" list
 			participants.Clear();
-			foreach (var participant in participantsData.Keys)
-			{
-				participants.Add(participant);
-			}
+			foreach (var id in participantsData.Keys)
+				participants.Add(id);
 			Puts("[Debug] Participants HashSet rebuilt for new tournament.");
 
-            StartTournamentFile();
+			// Reset everyone's score & persist immediately
+			foreach (var p in participantsData.Values)
+				p.Score = 0;
+			SaveParticipantsData();
+			Puts("[Debug] All participant scores reset to 0 and saved.");
 
-            try
-            {
-                Puts($"[Debug] Current state: isTournamentRunning={isTournamentRunning}, tournamentEndTime={tournamentEndTime:yyyy-MM-dd HH:mm:ss} UTC.");
+			StartTournamentFile();
 
-                if (isTournamentRunning)
-                {
-                    Puts("[Debug] Attempted to start tournament, but one is already running.");
-                    return;
-                }
+			try
+			{
+				Puts($"[Debug] Current state: isTournamentRunning={isTournamentRunning}, tournamentEndTime={tournamentEndTime:yyyy-MM-dd HH:mm:ss} UTC.");
 
-                if (Configuration.DurationHours <= 0.0167)
-                {
-                    PrintError("[Error] Invalid tournament duration. Ensure `DurationHours` in the configuration is greater than 0.");
-                    return;
-                }
+				if (isTournamentRunning)
+				{
+					Puts("[Debug] Attempted to start tournament, but one is already running.");
+					return;
+				}
 
-                isTournamentRunning = true;
-                tournamentEndTime = DateTime.UtcNow.AddHours(Configuration.DurationHours);
-                Puts($"[Info] Tournament started. Duration: {Configuration.DurationHours} hours. Ends at: {tournamentEndTime:yyyy-MM-dd HH:mm:ss} UTC.");
+				if (Configuration.DurationHours <= 0.0167)
+				{
+					PrintError("[Error] Invalid tournament duration. Ensure `DurationHours` > 0.");
+					return;
+				}
 
-                playerStats.Clear();
-                foreach (var participant in participantsData.Values)
-                {
-                    participant.Score = 0;
-                }
+				isTournamentRunning = true;
+				tournamentEndTime = DateTime.UtcNow.AddHours(Configuration.DurationHours);
+				Puts($"[Info] Tournament started. Duration: {Configuration.DurationHours} hours. Ends at: {tournamentEndTime:yyyy-MM-dd HH:mm:ss} UTC.");
 
-                if (countdownTimer != null)
-                {
-                    Puts("[Debug] Destroying existing countdown timer.");
-                    countdownTimer.Destroy();
-                    countdownTimer = null;
-                }
+				playerStats.Clear();
 
-                if (participantsData.Values.Any())
-                {
-                    LogEvent($"[Info] Participants at tournament start: {string.Join(", ", participantsData.Values.Select(p => p.Name))}");
-                }
-                else
-                {
-                    LogEvent("[Info] No participants at tournament start.");
-                }
+				if (countdownTimer != null)
+				{
+					Puts("[Debug] Destroying existing countdown timer.");
+					countdownTimer.Destroy();
+					countdownTimer = null;
+				}
 
-                LogEvent("[Info] Tournament started successfully.");
+				if (participantsData.Values.Any())
+					LogEvent($"[Info] Participants at tournament start: {string.Join(", ", participantsData.Values.Select(p => p.Name))}");
+				else
+					LogEvent("[Info] No participants at tournament start.");
 
-                ScheduleTournamentEnd();
-                
-                string globalMessage = FormatMessage(Configuration.MessageTemplates["StartTournament"], new Dictionary<string, string>
-                {
-                    { "TimeRemaining", FormatTimeRemaining(tournamentEndTime - DateTime.UtcNow) },
-                    { "Duration", Configuration.DurationHours.ToString() }
-                });
+				LogEvent("[Info] Tournament started successfully.");
 
-                SendTournamentMessage(globalMessage);
+				ScheduleTournamentEnd();
 
-                if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-                {
-                    Puts($"[Debug] Sending Discord notification for tournament start.");
-                    SendDiscordMessage(globalMessage);
-                }
+				string globalMessage = FormatMessage(Configuration.MessageTemplates["StartTournament"], new Dictionary<string, string>
+				{
+					{ "TimeRemaining", FormatTimeRemaining(tournamentEndTime - DateTime.UtcNow) },
+					{ "Duration", Configuration.DurationHours.ToString() }
+				});
+				SendTournamentMessage(globalMessage);
 
-            }
-            catch (Exception ex)
-            {
-                PrintError($"[Error] Failed to start tournament: {ex.Message}");
-            }
-        }
-
-        [ChatCommand("end_tournament")]
-        private void EndTournamentCommand(BasePlayer player, string command, string[] args)
-        {
-            if (!ValidateAdminCommand(player, "end the tournament"))
-            {
-                return;
-            }
-
-            if (!isTournamentRunning)
-            {
-                string message = FormatMessage(Configuration.MessageTemplates["NoTournamentRunning"], new Dictionary<string, string>
-                {
-                    { "TimeRemainingToStart", tournamentStartTime > DateTime.UtcNow ? FormatTimeRemaining(tournamentStartTime - DateTime.UtcNow) : "N/A" }
-                });
-                SendPlayerMessage(player, message);
-                return;
-            }
-
-            EndTournament();
-        }
+				if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
+				{
+					Puts("[Debug] Sending Discord notification for tournament start.");
+					SendDiscordMessage(globalMessage);
+				}
+			}
+			catch (Exception ex)
+			{
+				PrintError($"[Error] Failed to start tournament: {ex.Message}");
+			}
+		}
 
         private void EndTournament()
-        {
-            Puts("[Debug] EndTournament invoked.");
+		{
+			Puts("[Debug] EndTournament invoked.");
 
-            try
-            {
-                if (!isTournamentRunning)
-                {
-                    Puts("[Debug] No tournament is currently running.");
-                    return;
-                }
+			try
+			{
+				if (!isTournamentRunning)
+				{
+					Puts("[Debug] No tournament is currently running.");
+					return;
+				}
 
-                isTournamentRunning = false;
+				isTournamentRunning = false;
+				Puts("RustRoyale: Tournament ended!");
 
-                Puts("RustRoyale: Tournament ended!");
+				var sortedParticipants = participantsData.Values
+					.OrderByDescending(p => p.Score)
+					.ToList();
 
-                var sortedParticipants = participantsData.Values
-                    .OrderByDescending(p => p.Score)
-                    .ToList();
+				SaveTournamentHistory(sortedParticipants);
+				LogEvent("Tournament ended successfully.");
 
-                SaveTournamentHistory(sortedParticipants);
+				// Prepare leaderboard/results
+				string resultsMessage = "Leaderboard:\n";
+				if (sortedParticipants.Any())
+					resultsMessage += string.Join("\n", sortedParticipants.Select((p, idx) => $"{idx+1}. {p.Name} - {p.Score} Points"));
+				else
+					resultsMessage += "No participants scored points in this tournament.";
 
-                LogEvent("Tournament ended successfully.");
+				string globalMessage = FormatMessage(Configuration.MessageTemplates["EndTournament"], new Dictionary<string, string>())
+									   + "\n" + resultsMessage;
+				SendTournamentMessage(globalMessage);
+				if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
+					SendDiscordMessage(globalMessage);
 
-                // Prepare leaderboard/results
-                string resultsMessage = "Leaderboard:\n";
-                if (sortedParticipants.Any())
-                {
-                    resultsMessage += string.Join("\n", sortedParticipants.Select((p, index) => $"{index + 1}. {p.Name} - {p.Score} Points"));
-                }
-                else
-                {
-                    resultsMessage += "No participants scored points in this tournament.";
-                }
+				Puts($"[Debug] Notifications sent for tournament end: {globalMessage}");
+				Puts($"[Debug] Tournament successfully ended. Total participants: {sortedParticipants.Count}");
 
-                string globalMessage = FormatMessage(Configuration.MessageTemplates["EndTournament"], new Dictionary<string, string>());
-                globalMessage += $"\n{resultsMessage}";
-                SendTournamentMessage(globalMessage);
+				// Clear everyone's score & persist
+				foreach (var p in participantsData.Values)
+					p.Score = 0;
+				SaveParticipantsData();
+				Puts("[Debug] All participant scores reset to 0 and saved at tournament end.");
 
-                if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-                {
-                    SendDiscordMessage(globalMessage);
-                }
-
-                Puts($"[RustRoyale] [Debug] Notifications sent for tournament end: {globalMessage}");
-
-                Puts($"[Debug] Tournament successfully ended. Total participants: {sortedParticipants.Count}");
-
-                foreach (var participant in participantsData.Values)
-                {
-                    participant.Score = 0;
-                }
-
-                countdownTimer?.Destroy();
-                countdownTimer = null;
-
-                Puts("[Debug] Scheduling the next tournament.");
-                ScheduleTournament();
-            }
-            catch (Exception ex)
-            {
-                PrintError($"Failed to end tournament: {ex.Message}");
-            }
-        }
+				// Tear down and schedule next
+				countdownTimer?.Destroy();
+				countdownTimer = null;
+				Puts("[Debug] Scheduling the next tournament.");
+				ScheduleTournament();
+			}
+			catch (Exception ex)
+			{
+				PrintError($"Failed to end tournament: {ex.Message}");
+			}
+		}
 
         private void OnPlayerInit(BasePlayer player)
 		{
@@ -869,6 +850,18 @@ namespace Oxide.Plugins
 				lastDamageRecords[victim.userID] = (info.InitiatorPlayer, UnityEngine.Time.realtimeSinceStartup);
 			}
 		}
+		
+		private static readonly HashSet<string> AnimalPrefabs = new HashSet<string>
+		{
+			"wolf", "boar", "bear", "polar_bear", "stag", "deer",
+			"chicken", "horse"
+		};
+
+		private bool IsAnimalKill(string prefabName)
+		{
+			var lower = prefabName.ToLowerInvariant();
+			return AnimalPrefabs.Any(lower.Contains);
+		}
 
 		private void OnPlayerDeath(BasePlayer victim, HitInfo info)
 		{
@@ -914,15 +907,6 @@ namespace Oxide.Plugins
 			string entityName = initiatorEntity?.ShortPrefabName ?? "Unknown";
 			ulong ownerId = initiatorEntity?.OwnerID ?? 0;
 			string ownerName = ownerId != 0 ? GetPlayerName(ownerId) : "None";
-            
-            bool IsAnimalKill(string prefabName)
-			{
-				var animals = new List<string> { "wolf", "boar", "bear", "stag", "deer", "chicken" };
-				string lower = prefabName.ToLower();
-				
-				// Return true if the prefab name includes any known animal substring
-				return animals.Any(animal => lower.Contains(animal));
-			}
 
 			Puts($"[Debug] Death event detected: Victim={victim.displayName} (Type={victim.ShortPrefabName}), Attacker={attackerName}, Entity={entityName}, Owner={ownerName}.");
 
@@ -1021,6 +1005,9 @@ namespace Oxide.Plugins
                     "autoturret_deployed" => "autoturret",
                     "guntrap" => "guntrap",
                     "flameturret.deployed" => "flameturret",
+					"barricade" => "barricade",
+					"landmine" => "landmine",
+					"trap" => "trap",
                     _ => entityName
                 };
 
@@ -1098,31 +1085,6 @@ namespace Oxide.Plugins
 			
 			    Puts($"[Debug] ❌ ENT Killed By Player Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
 			
-            // Handle Animals killed by player
-            if (victim.IsNpc && attacker != null && IsAnimalKill(victim.ShortPrefabName))
-            {
-                // Calculate the distance between attacker and victim
-                float distance = Vector3.Distance(attacker.transform.position, victim.transform.position);
-                // Use the configurable threshold from your configuration file
-                if (distance > Configuration.AnimalKillDistance)
-                {
-                    if (participants.Contains(attacker.userID) && Configuration.ScoreRules.TryGetValue("WHY", out int points))
-                    {
-                        Puts($"[Debug] Awarding {points} point for killing an animal ({victim.ShortPrefabName}) from {distance:F1} meters away to {attacker.displayName}.");
-                        UpdatePlayerScore(
-                            attacker.userID,
-                            "WHY",
-                            $"killing an animal ({victim.ShortPrefabName}) from over {Configuration.AnimalKillDistance} meters away",
-                            victim,
-                            info
-                        );
-                    }
-                    return;
-                }
-            }
-
-                Puts($"[Debug] ❌ Animal Killed By Player Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
-            
 			// Handle NPCs killed by player
 			if (victim.IsNpc && attacker != null)
 			{
@@ -1237,6 +1199,43 @@ namespace Oxide.Plugins
         }
 
     #endregion
+
+	#region Distance‑based animal bonus  (WHY rule)
+
+		private void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
+		{
+			if (!isTournamentRunning) return;
+
+			var victim = entity as BaseNpc;
+			if (victim == null) return;                             // ignore players & structures
+			if (!IsAnimalKill(victim.ShortPrefabName)) return;      // keep only animals
+
+			var killer = info?.InitiatorPlayer;
+			if (killer == null) return;                             // no player involved
+			if (!participants.Contains(killer.userID)) return;      // not in tourney
+
+			float dist = Vector3.Distance(
+				killer.transform.position,
+				victim.transform.position);
+
+			if (dist <= Configuration.AnimalKillDistance) return;   // not far enough
+
+			if (Configuration.ScoreRules.TryGetValue("WHY", out int pts))
+			{
+				Puts($"[Debug] Awarding {pts} point(s) to {killer.displayName} for "
+					 + $"{victim.ShortPrefabName} kill at {dist:F1} m");
+
+				UpdatePlayerScore(
+					killer.userID,
+					"WHY",
+					$"killing an animal ({victim.ShortPrefabName}) "
+					+ $"from over {Configuration.AnimalKillDistance} m away",
+					null,
+					info);
+			}
+		}
+	
+	#endregion
 
     #region Score Handling
 
@@ -1808,69 +1807,108 @@ namespace Oxide.Plugins
     [PluginReference]
     private Plugin Kits;
 
-    private Dictionary<ulong, string> pendingKitRedemptions = new Dictionary<ulong, string>();
+	private void NormaliseKitPrices()
+	{
+		Configuration.KitPrices = new Dictionary<string, int>(
+			Configuration.KitPrices, StringComparer.OrdinalIgnoreCase);
+	}
 
-    #region Kit Economy Integration
-
+	#region Kit Economy Integration
 		[HookMethod("CanRedeemKit")]
 		private object CanRedeemKit(BasePlayer player, string kitName)
 		{
-			// Check if kit price is defined in your configuration
+			// 1) Must have a valid player
+			if (player == null)
+				return "No player supplied.";
+
+			// 2) If no kitName was passed (e.g. Kits is listing), allow it
+			if (string.IsNullOrWhiteSpace(kitName))
+				return null;
+
+			kitName = kitName.Trim();
+
+			// 3) Tournament must be running and player actively in it
+			if (!isTournamentRunning || !participants.Contains(player.userID))
+				return "You can only buy kits while you are actively taking part in the current tournament.";
+
+			// 4) Kit must exist
 			if (!Configuration.KitPrices.TryGetValue(kitName, out int kitPrice))
-			{
-				return "This kit is not available for purchase.";
-			}
-			
-			// Check if the player is enrolled in the tournament
+				return $"The kit '{kitName}' is not available for purchase.";
+
+			// 5) Player must be enrolled in the data store
 			if (!participantsData.TryGetValue(player.userID, out var participant))
-			{
 				return "You are not enrolled in the tournament.";
-			}
-			
-			// Check if the player has enough points
+
+			// 6) Must have enough points
 			if (participant.Score < kitPrice)
-			{
-				return $"You need {kitPrice} points to purchase the {kitName} kit, but you only have {participant.Score} points.";
-			}
-			
-			// All checks pass—allow kit redemption.
+				return $"You need {kitPrice} points to buy '{kitName}', but you only have {participant.Score}.";
+
+			// 7) All checks passed → allow
 			return null;
 		}
 
 		[HookMethod("OnKitRedeemed")]
 		private void OnKitRedeemed(BasePlayer player, string kitName)
 		{
-			// Confirm the kit price again (in case of config mismatch)
+			if (player == null || string.IsNullOrWhiteSpace(kitName)) return;
+			kitName = kitName.Trim();
+
 			if (!Configuration.KitPrices.TryGetValue(kitName, out int kitPrice))
 			{
 				PrintWarning($"[KitsEconomy] No price defined for kit: {kitName}");
 				return;
 			}
 
-			// Deduct the points manually from the player's tournament score.
-			if (participantsData.TryGetValue(player.userID, out var participant))
+			if (!participantsData.TryGetValue(player.userID, out var participant))
+				return;                                 // shouldn’t happen – safety first
+
+			// ──────────────────────────────────────────────────────────────
+			// 1)  Deduct points atomically
+			// ──────────────────────────────────────────────────────────────
+			bool pointsDeducted = false;
+			lock (participantsDataLock)
 			{
-				int previousScore = participant.Score;
-				participant.Score -= kitPrice;
-				SaveParticipantsData();
-
-				Puts($"[Debug] {participant.Name} purchased {kitName} kit. Points deducted: {kitPrice}. New Score: {participant.Score}");
-
-				var placeholders = new Dictionary<string, string>
+				if (participant.Score >= kitPrice)
 				{
-					{ "PlayerName", player.displayName },
-					{ "KitName", kitName },
-					{ "Price", kitPrice.ToString() },
-					{ "TotalPoints", participant.Score.ToString() }
-				};
-
-				string message = FormatMessage(Configuration.MessageTemplates["KitPurchaseSuccess"], placeholders);
-				SendPlayerMessage(player, message);
-
-				LogEvent($"{participant.Name} purchased kit {kitName} for {kitPrice} points. Previous Score: {previousScore}, New Score: {participant.Score}");
+					participant.Score -= kitPrice;
+					pointsDeducted = true;
+				}
 			}
-		}
 
+			if (!pointsDeducted)
+			{
+				// ➜ Edge‑case: kit was delivered but points weren't available / deducted.
+				//     • Strip the kit back OR
+				//     • Push the score into the negative.  Choose the policy you prefer.
+				//
+				// Example: push into the negative but keep the kit
+				lock (participantsDataLock)
+				{
+					participant.Score -= kitPrice;      // will go negative
+				}
+
+				SaveParticipantsData();
+				PrintWarning($"[RustRoyale] {player.displayName} received kit '{kitName}' without sufficient points. " +
+							 $"Score forced to {participant.Score}.");
+				LogEvent($"{player.displayName} forced into negative score ({participant.Score}) " +
+						 $"after kit '{kitName}' could not be fully charged.");
+				return;
+			}
+
+			SaveParticipantsData();
+
+			// ──────────────────────────────────────────────────────────────
+			// 2)  Normal happy‑path messaging
+			// ──────────────────────────────────────────────────────────────
+			string broadcast =
+				$"{player.displayName} just spent {kitPrice} points on the **{kitName}** kit! " +
+				$"Balance: {participant.Score}.";
+
+			Server.Broadcast(broadcast);
+			SendDiscordMessage(broadcast);
+			LogEvent($"{participant.Name} purchased kit '{kitName}' for {kitPrice} points. New Score: {participant.Score}");
+		}
+	
 	#endregion
 
     #region Commands
@@ -2012,48 +2050,49 @@ namespace Oxide.Plugins
 		}
 
         [ChatCommand("open_tournament")]
-        private void OpenTournamentCommand(BasePlayer player, string command, string[] args)
-        {
-            if (participantsData.ContainsKey(player.userID))
-            {
-                Puts($"[Debug] {player.displayName} ({player.userID}) attempted to opt-in but is already in participantsData.");
-                string message = Configuration.MessageTemplates.TryGetValue("AlreadyOptedIn", out var alreadyOptedInTemplate)
-                    ? FormatMessage(alreadyOptedInTemplate, new Dictionary<string, string>
-                    {
-                        { "PlayerName", player.displayName }
-                    })
-                    : $"{player.displayName}, you are already opted into the tournament.";
-                SendPlayerMessage(player, message);
-                return;
-            }
-
-            if (participantsData.ContainsKey(player.userID))
+		private void OpenTournamentCommand(BasePlayer player, string command, string[] args)
+		{
+			// ── 1) Already in the dictionary ──────────────────────────────────────────
+			if (participantsData.TryGetValue(player.userID, out var existingParticipant))
 			{
-				inactiveParticipants.Remove(player.userID);
+				// If they were inactive, simply reactivate them
+				if (inactiveParticipants.Remove(player.userID))
+				{
+					Puts($"[Debug] {player.displayName} ({player.userID}) re‑enabled from inactive list.");
+					SaveParticipantsData();
+
+					string reactivateMsg = $"{player.displayName}, you’ve re‑joined the tournament. Welcome back!";
+					SendPlayerMessage(player, reactivateMsg);
+					LogEvent($"{player.displayName} reactivated entry in the tournament.");
+				}
+				else
+				{
+					// They are already active – tell them and bail out
+					Puts($"[Debug] {player.displayName} ({player.userID}) attempted to opt‑in but is already active.");
+					string alreadyMsg = Configuration.MessageTemplates.TryGetValue("AlreadyOptedIn", out var tmp)
+						? FormatMessage(tmp, new Dictionary<string,string>{{"PlayerName", player.displayName}})
+						: $"{player.displayName}, you are already opted into the tournament.";
+					SendPlayerMessage(player, alreadyMsg);
+				}
+				return;
 			}
-			else
-			{
-				participantsData[player.userID] = new PlayerStats(player.userID);
-			}
 
-            if (!openTournamentPlayers.Contains(player.userID))
-            {
-                openTournamentPlayers.Add(player.userID);
-                Puts($"[Debug] {player.displayName} ({player.userID}) added to openTournamentPlayers.");
-            }
+			// ── 2) First‑time opt‑in ──────────────────────────────────────────────────
+			var newParticipant = new PlayerStats(player.userID) { Name = player.displayName };
+			participantsData[player.userID] = newParticipant;
+			inactiveParticipants.Remove(player.userID);         // safety
+			openTournamentPlayers.Add(player.userID);
 
-            SaveParticipantsData();
+			Puts($"[Debug] {player.displayName} ({player.userID}) added to participantsData and openTournamentPlayers.");
+			SaveParticipantsData();
 
-            string successMessage = Configuration.MessageTemplates.TryGetValue("JoinTournament", out var joinTournamentTemplate)
-                ? FormatMessage(joinTournamentTemplate, new Dictionary<string, string>
-                {
-                    { "PlayerName", player.displayName }
-                })
-                : $"{player.displayName} has successfully opted into the tournament.";
-            SendPlayerMessage(player, successMessage);
+			string successMsg = Configuration.MessageTemplates.TryGetValue("JoinTournament", out var joinTpl)
+				? FormatMessage(joinTpl, new Dictionary<string,string>{{"PlayerName", player.displayName}})
+				: $"{player.displayName} has successfully opted into the tournament.";
+			SendPlayerMessage(player, successMsg);
 
-            LogEvent($"{player.displayName} opted into the tournament.");
-        }
+			LogEvent($"{player.displayName} opted into the tournament.");
+		}
 
         [ChatCommand("close_tournament")]
         private void CloseTournamentCommand(BasePlayer player, string command, string[] args)
