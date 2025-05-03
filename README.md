@@ -60,26 +60,36 @@ RustRoyale fits a variety of playstyles and scenarios, including:
   "ChatFormat": "[<color=#d97559>RustRoyale</color>] {message}",
   "ChatIconSteamId": "76561199815164411",
   "ChatUsername": "[RustRoyale]",
+  "Timezone": "Central Standard Time",
+  "StartDay": "Thursday",
   "AutoStartEnabled": true,
-  "StartDay": "Friday",
-  "StartHour": 14,
+  "AutoEnrollEnabled": true,
+  "PenaltyOnExitEnabled": true,
+  "PenaltyPointsOnExit": 25,
+  "StartHour": 15,
   "StartMinute": 0,
-  "DurationHours": 72,
+  "DurationHours": 720,
   "DataRetentionDays": 30,
   "TopPlayersToTrack": 3,
+  "JoinCutoffHours": 24,
   "NotificationIntervals": [
+    600,
+    60,
+    600,
+    60,
     600,
     60
   ],
-  "Timezone": "UTC",
   "ScoreRules": {
     "KILL": 3,
     "DEAD": -3,
     "JOKE": -1,
     "NPC": 1,
     "ENT": 5,
-    "BRUH": -2
+    "BRUH": -2,
+    "WHY": 5
   },
+  "AnimalKillDistance": 100.0,
   "MessageTemplates": {
     "StartTournament": "Brace yourselves, champions! The tournament has begun! Time to show off those pro skills (or hilarious fails). Time left: {TimeRemaining}. Duration: {Duration} hours.",
     "EndTournament": "The tournament is over! Congrats to the winners, and for the rest... better luck next time (maybe practice a bit?).",
@@ -88,6 +98,7 @@ RustRoyale fits a variety of playstyles and scenarios, including:
     "TimeRemaining": "Tick-tock! Time remaining in the tournament: {Time}. Don't waste it—score some points!",
     "JoinTournament": "{PlayerName} has entered the fray! Grab the popcorn, this should be good.",
     "LeaveTournament": "{PlayerName} has exited the battlefield. Maybe they got scared? We’ll never know.",
+    "KitPurchaseSuccess": "{PlayerName} has successfully purchased the {KitName} kit for {Price} points. Your new balance is {TotalPoints} points.",
     "KillPlayerWithEntity": "{PlayerName} earned {Score} point{PluralS} for eliminating {VictimName} with {EntityName} to respawn land! Total score: {TotalScore}. Savage!",
     "SelfInflictedDeath": "Oops! {PlayerName} lost {Score} point{PluralS} for a self-inflicted oopsie. Total score: {TotalScore}. Smooth move, buddy.",
     "DeathByEntity": "{PlayerName} was defeated by {AttackerType} and lost {Score} point{PluralS}. Ouch! Total score: {TotalScore}",
@@ -97,6 +108,7 @@ RustRoyale fits a variety of playstyles and scenarios, including:
     "KillPlayer": "{PlayerName} earned {Score} point{PluralS} for sending {VictimName} to respawn land! Total score: {TotalScore}.",
     "KilledByPlayer": "{VictimName} lost {Score} point{PluralS} for being killed by {AttackerName}. Total score: {TotalScore}. Better luck next time!",
     "DeathByBRUH": "{PlayerName} lost {Score} point{PluralS} for getting defeated by {EntityName}. Total score: {TotalScore}. BRUH moment!",
+    "KillAnimal": "{PlayerName} earned {Score} point{PluralS} for killing an animal ({VictimName}) from over {Distance} meters away! Total score: {TotalScore}.",
     "NoTournamentRunning": "Hold your horses! There's no tournament right now. Next round starts in {TimeRemainingToStart}. Grab a snack meanwhile!",
     "ParticipantsAndScores": "Scoreboard time! (Page {Page}/{TotalPages}): {PlayerList}. Who’s crushing it? Who’s just chilling?",
     "NotInTournament": "Uh-oh! You’re not part of the tournament. Join in, don’t be shy!",
@@ -110,7 +122,15 @@ RustRoyale fits a variety of playstyles and scenarios, including:
     "TournamentAlreadyRunning": "Whoa there! A tournament is already underway. Time left: {TimeRemaining}. Jump in or cheer from the sidelines!",
     "NoScores": "No scores available yet. Join the tournament and make some history!",
     "TournamentAboutToStart": "The tournament is about to start! Opt-in now to participate.",
-    "TournamentCountdown": "Tournament starting soon! {Time} left to join."
+    "TournamentCountdown": "Tournament starting soon! {Time} left to join.",
+    "LeaveTournamentPenalty": "{PlayerName} left the tournament and lost {PenaltyPoints} points!"
+  },
+  "KitPrices": {
+    "Starter": 5,
+    "Bronze": 25,
+    "Silver": 50,
+    "Gold": 75,
+    "Platinum": 100
   }
 }
 ```
