@@ -12,7 +12,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.1.9"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.2.0"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
     
@@ -29,14 +29,14 @@ namespace Oxide.Plugins
             public string StartDay { get; set; } = "Friday";
             public bool AutoStartEnabled { get; set; } = true;
             public bool AutoEnrollEnabled { get; set; } = true;
-			public bool PenaltyOnExitEnabled { get; set; } = true; // Default enabled
-			public int PenaltyPointsOnExit { get; set; } = 25;      // Default -25 points
+            public bool PenaltyOnExitEnabled { get; set; } = true; // Default enabled
+            public int PenaltyPointsOnExit { get; set; } = 25;      // Default -25 points
             public int StartHour { get; set; } = 12;
             public int StartMinute { get; set; } = 0;
             public int DurationHours { get; set; } = 125;
             public int DataRetentionDays { get; set; } = 30; // Default to 30 days
             public int TopPlayersToTrack { get; set; } = 3; // Default to Top 3 players
-			public int JoinCutoffHours  { get; set; } = 6;   // 0 = no late‑join cut‑off
+            public int JoinCutoffHours  { get; set; } = 6;   // 0 = no late‑join cut‑off
             public List<int> NotificationIntervals { get; set; } = new List<int> { 600, 60 }; // Default: every 10 minutes (600 seconds) and last minute (60 seconds)
             public Dictionary<string, int> ScoreRules { get; set; } = new Dictionary<string, int>
             {
@@ -147,7 +147,7 @@ namespace Oxide.Plugins
                 updated = true;
             }
 
-            if (Configuration.DurationHours < 0.0167 || Configuration.DurationHours > 168) // Limit to 1 week
+            if (Configuration.DurationHours < 0.0167 || Configuration.DurationHours > 872) // Limit to 36 days
             {
                 PrintWarning($"Invalid DurationHours in configuration: {Configuration.DurationHours}. Defaulting to 72 hours.");
                 Configuration.DurationHours = 72;
@@ -1064,26 +1064,6 @@ namespace Oxide.Plugins
             }
 			
 			    Puts($"[Debug] ❌ Death By Traps Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
-
-            // Handle Entity eliminated by player
-            if (initiatorEntity != null && attacker != null && !victim.IsNpc && participants.Contains(attacker.userID))
-            {
-                if (Configuration.ScoreRules.TryGetValue("ENT", out int points))
-                {
-                    UpdatePlayerScore(
-                        attacker.userID,
-                        "ENT",
-                        $"eliminating an entity ({victim.ShortPrefabName})",
-                        victim,
-                        info
-                    );
-
-                    Puts($"[Debug] {attacker.displayName} earned points for killing an entity ({victim.ShortPrefabName}).");
-                }
-                return;
-            }
-			
-			    Puts($"[Debug] ❌ ENT Killed By Player Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
 			
 			// Handle NPCs killed by player
 			if (victim.IsNpc && attacker != null)
@@ -1200,38 +1180,46 @@ namespace Oxide.Plugins
 
     #endregion
 
-	#region Distance‑based animal bonus  (WHY rule)
+	#region OnEntityDeath
 
 		private void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
 		{
 			if (!isTournamentRunning) return;
 
-			var victim = entity as BaseNpc;
-			if (victim == null) return;                             // ignore players & structures
-			if (!IsAnimalKill(victim.ShortPrefabName)) return;      // keep only animals
-
-			var killer = info?.InitiatorPlayer;
-			if (killer == null) return;                             // no player involved
-			if (!participants.Contains(killer.userID)) return;      // not in tourney
-
-			float dist = Vector3.Distance(
-				killer.transform.position,
-				victim.transform.position);
-
-			if (dist <= Configuration.AnimalKillDistance) return;   // not far enough
-
-			if (Configuration.ScoreRules.TryGetValue("WHY", out int pts))
+			// ---------- ENT (heli / Bradley) ----------
+			if (entity.ShortPrefabName.Contains("helicopter") ||
+				entity.ShortPrefabName.Contains("bradley"))
 			{
-				Puts($"[Debug] Awarding {pts} point(s) to {killer.displayName} for "
-					 + $"{victim.ShortPrefabName} kill at {dist:F1} m");
+				var killer = info?.InitiatorPlayer;
+				if (killer != null && participants.Contains(killer.userID)
+					&& Configuration.ScoreRules.TryGetValue("ENT", out int entPts))
+				{
+					string entName = entity.ShortPrefabName.Contains("helicopter") ? "Helicopter" : "Bradley";
+					UpdatePlayerScore(killer.userID, "ENT", $"destroying a {entName}", null, info, entityName: entName);
+					Puts($"[Debug] {killer.displayName} earned {entPts} point(s) for downing a {entName}.");
+				}
+				return;                 // ENT handled → nothing else to do
+			}
 
+			// ---------- Animal long-range “WHY” bonus ----------
+			var victim = entity as BaseNpc;
+			if (victim == null || !IsAnimalKill(victim.ShortPrefabName)) return;
+
+			var killer2 = info?.InitiatorPlayer;
+			if (killer2 == null || !participants.Contains(killer2.userID)) return;
+
+			float dist = Vector3.Distance(killer2.transform.position, victim.transform.position);
+			if (dist <= Configuration.AnimalKillDistance) return;
+
+			if (Configuration.ScoreRules.TryGetValue("WHY", out int whyPts))
+			{
 				UpdatePlayerScore(
-					killer.userID,
+					killer2.userID,
 					"WHY",
-					$"killing an animal ({victim.ShortPrefabName}) "
-					+ $"from over {Configuration.AnimalKillDistance} m away",
+					$"killing an animal ({victim.ShortPrefabName}) from over {Configuration.AnimalKillDistance} m away",
 					null,
 					info);
+				Puts($"[Debug] Awarded {whyPts} pt(s) to {killer2.displayName} for {victim.ShortPrefabName} kill at {dist:F1} m");
 			}
 		}
 	
