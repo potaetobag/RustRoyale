@@ -15,7 +15,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.2.2"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.2.3"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
 		private const string ConfigUiPanelName = "RustRoyale_Config_UI";
@@ -24,10 +24,15 @@ namespace Oxide.Plugins
 		private string WelcomeOptOutFile => $"{DataDirectory}/WelcomeOptOut.json";
 		private Dictionary<ulong, string> teamLeaderNames = new();
 		private string TeamLeadersFile => $"{DataDirectory}/TeamLeaders.json";
+		private string WithIndefiniteArticle(string word)
+			{
+				if (string.IsNullOrEmpty(word)) return "an unknown entity";
+				string lower = word.ToLowerInvariant();
+				return "aeiou".Contains(lower[0]) ? $"an {word}" : $"a {word}";
+			}
     
     #region Configuration
         private ConfigData Configuration;
-
         private class ConfigData
         {
             public string DiscordWebhookUrl { get; set; } = "";
@@ -45,7 +50,7 @@ namespace Oxide.Plugins
             public int StartMinute { get; set; } = 0;
             public int DurationHours { get; set; } = 125;
             public int DataRetentionDays { get; set; } = 30;
-            public int TopPlayersToTrack { get; set; } = 3; // Default to Top 3 players
+            public int TopPlayersToTrack { get; set; } = 3;
 			public int TopClansToTrack { get; set; } = 3;
 			public int JoinCutoffHours { get; set; } = 0; // 0 = No late‑join cut‑off
             public List<int> NotificationIntervals { get; set; } = new List<int> { 600, 60 }; // Default: every 10 minutes (600 seconds) and last minute (60 seconds)
@@ -57,7 +62,7 @@ namespace Oxide.Plugins
                 {"NPC", 1},      // Kill an NPC (Murderer, Zombie, Scientist, Scarecrow)
                 {"ENT", 20},     // Kill a Helicopter or Bradley Tank
                 {"BRUH", -2},    // Death by an NPC, Helicopter, or Bradley
-                {"WHY", 5}       // Award points for killing an animal (wolf, boar, bear, stag, deer) from over Xm away
+                {"WHY", 5}       // Award points for killing an animal (wolf, boar, bear, stag, deer) from over Xm away 
             };
             public float AnimalKillDistance { get; set; } = 150f;
             public Dictionary<string, string> MessageTemplates { get; set; } = new Dictionary<string, string>
@@ -73,24 +78,18 @@ namespace Oxide.Plugins
                 {"KitPurchaseSuccess", "{PlayerName} has successfully purchased the {KitName} kit for {Price} points. Your new balance is {TotalPoints} points."},
                 {"KillPlayerWithEntity", "{PlayerName} earned {Score} point{PluralS} for eliminating {VictimName} with {EntityName} to respawn land! Total score: {TotalScore}. Savage!"},
                 {"SelfInflictedDeath", "Oops! {PlayerName} lost {Score} point{PluralS} for a self-inflicted oopsie. Total score: {TotalScore}. Smooth move, buddy."},
-                {"DeathByEntity", "{PlayerName} was defeated by {AttackerType} and lost {Score} point{PluralS}. Ouch! Total score: {TotalScore}"},
-                {"DeathByNPC", "Yikes! {PlayerName} lost {Score} point{PluralS} for getting clobbered by an NPC. Total score: {TotalScore}."},
-                {"KillEntity", "{PlayerName} earned {Score} point{PluralS} for obliterating a {AttackerType}! Total score: {TotalScore}. BOOM!"},
-                {"KillNPC", "{PlayerName} earned {Score} point{PluralS} for bravely taking down an NPC! Total score: {TotalScore}."},
-                {"KillPlayer", "{PlayerName} earned {Score} point{PluralS} for sending {VictimName} to respawn land! Total score: {TotalScore}."},
+                
+				{"KillEntity", "{PlayerName} earned {Score} point{PluralS} for obliterating {ArticleEntityName}! Total score: {TotalScore}. BOOM!" },
+				{"KillNPC", "{PlayerName} earned {Score} point{PluralS} for bravely taking down {ArticleEntityName}! Total score: {TotalScore}." },
                 {"KilledByPlayer", "{VictimName} lost {Score} point{PluralS} for being killed by {AttackerName}. Total score: {TotalScore}. Better luck next time!"},
-                {"DeathByBRUH", "{PlayerName} lost {Score} point{PluralS} for getting defeated by {EntityName}. Total score: {TotalScore}. BRUH moment!"},
-                {"KillAnimal", "{PlayerName} earned {Score} point{PluralS} for killing an animal ({VictimName}) from over {Distance} meters away! Total score: {TotalScore}."},
-                {"NoTournamentRunning", "Hold your horses! There's no tournament right now. Next round starts in {TimeRemainingToStart}. Grab a snack meanwhile!"},
-                {"ParticipantsAndScores", "Scoreboard time! (Page {Page}/{TotalPages}): {PlayerList}. Who’s crushing it? Who’s just chilling?"},
+                {"DeathByBRUH", "{PlayerName} lost {Score} point{PluralS} for getting defeated by {ArticleEntityName}. Total score: {TotalScore}. BRUH moment!"},
+                {"KillAnimal", "{PlayerName} earned {Score} point{PluralS} for killing {ArticleEntityName} from over {Distance} meters away! Total score: {TotalScore}." },
+                
                 {"NotInTournament", "Uh-oh! You’re not part of the tournament. Join in, don’t be shy!"},
                 {"NoPermission", "Sorry, you don’t have permission to {ActionName}. Maybe ask the admins for a favor?"},
                 {"AlreadyParticipating", "Relax, {PlayerName}. You’re already in the tournament. No need to double-dip!"},
                 {"AlreadyOptedIn", "Nice try, {PlayerName}, but you’re already opted in. Eager much?"},
                 {"OptedOutTournament", "{PlayerName} has decided to opt out. Bye-bye! Don’t let FOMO get you."},
-                {"NotOptedInTournament", "You weren’t even opted in, {PlayerName}. Why so dramatic?"},
-                {"TournamentNotRunning", "Patience is a virtue, {PlayerName}. No tournament now. Next round starts in {TimeRemainingToStart}. Go sharpen your skills!"},
-                {"TournamentScores", "Here’s the rundown of scores: {PlayerList}. Is your name shining, or are you just here for the jokes?"},
                 {"TournamentAlreadyRunning", "Whoa there! A tournament is already underway. Time left: {TimeRemaining}. Jump in or cheer from the sidelines!"},
                 {"NoScores", "No scores available yet. Join the tournament and make some history!"},
                 {"TournamentAboutToStart", "The tournament is about to start! Opt-in now to participate."},
@@ -107,9 +106,7 @@ namespace Oxide.Plugins
             };
 
         }
-    
     #endregion
-
     #region Configuration Handling
         protected override void LoadDefaultConfig()
         {
@@ -135,28 +132,44 @@ namespace Oxide.Plugins
         }
 
         private void ValidateConfiguration()
-        {
-            bool updated = false;
+		{
+			bool updated = false;
 
-            if (!Enum.TryParse(Configuration.StartDay, true, out DayOfWeek _))
-            {
-                PrintWarning("Invalid StartDay in configuration. Defaulting to Friday.");
-                Configuration.StartDay = "Friday";
-                updated = true;
-            }
-			
-			if (Configuration.PenaltyPointsOnExit < 0)
+			void SetDefault<T>(Func<T> getter, Action<T> setter, T defaultValue, string label, Func<T, bool> isInvalid)
 			{
-				PrintWarning("Invalid PenaltyPointsOnExit. Defaulting to 25.");
-				Configuration.PenaltyPointsOnExit = 25;
+				if (isInvalid(getter()))
+				{
+					PrintWarning($"Invalid {label}. Defaulting to {defaultValue}.");
+					setter(defaultValue);
+					updated = true;
+				}
+			}
+
+			if (!Enum.TryParse(Configuration.StartDay, true, out DayOfWeek _))
+			{
+				PrintWarning("Invalid StartDay in configuration. Defaulting to Friday.");
+				Configuration.StartDay = "Friday";
 				updated = true;
 			}
 
-			if (Configuration.AnimalKillDistance <= 0)
+			SetDefault(() => Configuration.PenaltyPointsOnExit, v => Configuration.PenaltyPointsOnExit = v, 25, "PenaltyPointsOnExit", v => v < 0);
+			SetDefault(() => Configuration.AnimalKillDistance, v => Configuration.AnimalKillDistance = v, 150f, "AnimalKillDistance", v => v <= 0);
+			SetDefault(() => Configuration.StartHour, v => Configuration.StartHour = v, 14, "StartHour", v => v < 0 || v > 23);
+			SetDefault(() => Configuration.StartMinute, v => Configuration.StartMinute = v, 0, "StartMinute", v => v < 0 || v > 59);
+			SetDefault(() => Configuration.DataRetentionDays, v => Configuration.DataRetentionDays = v, 30, "DataRetentionDays", v => v <= 0);
+			SetDefault(() => Configuration.TopPlayersToTrack, v => Configuration.TopPlayersToTrack = v, 3, "TopPlayersToTrack", v => v <= 0);
+			SetDefault(() => Configuration.TopClansToTrack, v => Configuration.TopClansToTrack = v, 3, "TopClansToTrack", v => v <= 0);
+			SetDefault(() => Configuration.JoinCutoffHours, v => Configuration.JoinCutoffHours = 6, 6, "JoinCutoffHours", v => v < 0 || v > Configuration.DurationHours);
+
+			if (Configuration.DurationHours < 0.0167 || Configuration.DurationHours > 872)
 			{
-				PrintWarning("Invalid AnimalKillDistance. Defaulting to 150.");
-				Configuration.AnimalKillDistance = 150f;
+				PrintWarning($"Invalid DurationHours: {Configuration.DurationHours}. Defaulting to 72.");
+				Configuration.DurationHours = 72;
 				updated = true;
+			}
+			else if (Configuration.DurationHours < 1)
+			{
+				Puts($"[Debug] Short tournament duration detected: {Configuration.DurationHours} hours. This is valid.");
 			}
 
 			if (Configuration.ScoreRules == null || Configuration.ScoreRules.Count == 0)
@@ -175,100 +188,47 @@ namespace Oxide.Plugins
 				PrintWarning("KitPrices missing or empty. Using defaults.");
 				Configuration.KitPrices = new Dictionary<string, int>
 				{
-					{"Starter", 5}, {"Bronze", 25}, {"Silver", 50}, {"Gold", 75}, {"Platinum", 100}
+					{"Starter", 5}, {"Bronze", 25}, {"Silver", 50},
+					{"Gold", 75}, {"Platinum", 100}
 				};
 				updated = true;
 			}
 
-            if (Configuration.StartHour < 0 || Configuration.StartHour > 23)
-            {
-                PrintWarning("Invalid StartHour in configuration. Defaulting to 14 (2 PM).");
-                Configuration.StartHour = 14;
-                updated = true;
-            }
+			if (Configuration.NotificationIntervals == null || !Configuration.NotificationIntervals.Any())
+			{
+				PrintWarning("NotificationIntervals is invalid or missing. Defaulting to every 10 minutes and the last minute.");
+				Configuration.NotificationIntervals = new List<int> { 600, 60 };
+				updated = true;
+			}
+			else
+			{
+				var cleaned = Configuration.NotificationIntervals.Where(x => x > 0).Distinct().ToList();
+				if (cleaned.Count != Configuration.NotificationIntervals.Count)
+				{
+					PrintWarning("NotificationIntervals contained invalid or duplicate values. Cleaning up the list.");
+					Configuration.NotificationIntervals = cleaned;
+					updated = true;
+				}
+			}
 
-            if (Configuration.StartMinute < 0 || Configuration.StartMinute > 59)
-            {
-                PrintWarning("Invalid StartMinute in configuration. Defaulting to 0 (top of the hour).");
-                Configuration.StartMinute = 0;
-                updated = true;
-            }
-
-            if (Configuration.DurationHours < 0.0167 || Configuration.DurationHours > 872) // Limit to 36 days
-            {
-                PrintWarning($"Invalid DurationHours in configuration: {Configuration.DurationHours}. Defaulting to 72 hours.");
-                Configuration.DurationHours = 72;
-                updated = true;
-            }
-            else if (Configuration.DurationHours < 1 && Configuration.DurationHours >= 0.0167)
-            {
-                Puts($"[Debug] Short tournament duration detected: {Configuration.DurationHours} hours. This is valid.");
-            }
-
-            if (Configuration.DataRetentionDays <= 0)
-            {
-                PrintWarning("Invalid DataRetentionDays in configuration. Defaulting to 30 days.");
-                Configuration.DataRetentionDays = 30;
-                updated = true;
-            }
-
-            if (Configuration.TopPlayersToTrack <= 0)
-            {
-                PrintWarning("Invalid TopPlayersToTrack in configuration. Defaulting to 3.");
-                Configuration.TopPlayersToTrack = 3;
-                updated = true;
-            }
-
-            if (Configuration.NotificationIntervals == null || !Configuration.NotificationIntervals.Any())
-            {
-                PrintWarning("NotificationIntervals is invalid or missing. Defaulting to every 10 minutes and the last minute.");
-                Configuration.NotificationIntervals = new List<int> { 600, 60 };
-                updated = true;
-            }
-
-            if (Configuration.NotificationIntervals.Any(interval => interval <= 0))
-            {
-                PrintWarning("NotificationIntervals contains invalid values. Removing non-positive intervals.");
-                Configuration.NotificationIntervals = Configuration.NotificationIntervals.Where(interval => interval > 0).ToList();
-                updated = true;
-            }
-			
 			if (Configuration.ShowWelcomeUI != true && Configuration.ShowWelcomeUI != false)
 			{
-				PrintWarning("Invalid 'ShowWelcomeUI'. Defaulting to true.");
+				PrintWarning("Invalid ShowWelcomeUI. Defaulting to true.");
 				Configuration.ShowWelcomeUI = true;
 				updated = true;
 			}
-			
-			if (Configuration.TopClansToTrack <= 0)
+
+			if (updated)
 			{
-				PrintWarning("Invalid TopClansToTrack in configuration. Defaulting to 3.");
-				Configuration.TopClansToTrack = 3;
-				updated = true;
-			}
-			
-			if (Configuration.JoinCutoffHours < 0 ||
-				Configuration.JoinCutoffHours > Configuration.DurationHours)
-			{
-				PrintWarning($"JoinCutoffHours was {Configuration.JoinCutoffHours}; " +
-							 $"must be between 0 and DurationHours ({Configuration.DurationHours}). " +
-							 $"Defaulting to 6.");
-				Configuration.JoinCutoffHours = 6;
-				updated = true;
+				SaveConfig();
+				Puts("Configuration updated with validated defaults.");
 			}
 
-            if (updated)
-            {
-                SaveConfig();
-                Puts("Configuration updated with validated defaults.");
-            }
-
-            Puts($"Configuration validated: StartDay={Configuration.StartDay}, StartHour={Configuration.StartHour}, DurationHours={Configuration.DurationHours}, DataRetentionDays={Configuration.DataRetentionDays}, TopPlayersToTrack={Configuration.TopPlayersToTrack}, TopClansToTrack={Configuration.TopClansToTrack}, NotificationIntervals={string.Join(", ", Configuration.NotificationIntervals)}.");
-
-        }
-    
+			Puts($"Configuration validated: StartDay={Configuration.StartDay}, StartHour={Configuration.StartHour}, DurationHours={Configuration.DurationHours}, " +
+				 $"DataRetentionDays={Configuration.DataRetentionDays}, TopPlayersToTrack={Configuration.TopPlayersToTrack}, " +
+				 $"TopClansToTrack={Configuration.TopClansToTrack}, NotificationIntervals={string.Join(", ", Configuration.NotificationIntervals)}.");
+		}
     #endregion
-
     #region Plugin Handle
         private void OnUnload()
         {
@@ -296,9 +256,7 @@ namespace Oxide.Plugins
                 countdownTimer = null;
             }
         }
-    
     #endregion 
-
     #region Timezone Handling
         private TimeZoneInfo GetTimezone()
         {
@@ -329,11 +287,49 @@ namespace Oxide.Plugins
             var timezone = GetTimezone();
             return TimeZoneInfo.ConvertTimeToUtc(localTime, timezone);
         }
-    
     #endregion
-	
 	#region UI
-	
+		private void AddCuiLabel(CuiElementContainer container, string parent, string anchorMin, string anchorMax, string text, int fontSize = 14, TextAnchor align = TextAnchor.MiddleLeft)
+		{
+			container.Add(new CuiLabel
+			{
+				RectTransform = { AnchorMin = anchorMin, AnchorMax = anchorMax },
+				Text = { Text = text, FontSize = fontSize, Align = align }
+			}, parent);
+		}
+
+		private void AddCuiPanel(CuiElementContainer container, string parent, string anchorMin, string anchorMax, string color, string name = null)
+		{
+			container.Add(new CuiPanel
+			{
+				Image = { Color = color },
+				RectTransform = { AnchorMin = anchorMin, AnchorMax = anchorMax }
+			}, parent, name);
+		}
+
+		private void AddCuiButton(CuiElementContainer container, string parent, string anchorMin, string anchorMax, string text, string command, string color = "0.5 0.5 0.5 1", int fontSize = 14)
+		{
+			container.Add(new CuiButton
+			{
+				Button = { Command = command, Color = color },
+				RectTransform = { AnchorMin = anchorMin, AnchorMax = anchorMax },
+				Text = { Text = text, FontSize = fontSize, Align = TextAnchor.MiddleCenter }
+			}, parent);
+		}
+
+		private void AddCuiRawImage(CuiElementContainer container, string parent, string anchorMin, string anchorMax, string url)
+		{
+			container.Add(new CuiElement
+			{
+				Parent = parent,
+				Components =
+				{
+					new CuiRawImageComponent { Url = url },
+					new CuiRectTransformComponent { AnchorMin = anchorMin, AnchorMax = anchorMax }
+				}
+			});
+		}
+		
 		private void LoadWelcomeOptOut()
 		{
 			if (File.Exists(WelcomeOptOutFile))
@@ -391,16 +387,7 @@ namespace Oxide.Plugins
 				y -= 0.06f;
 			}
 
-			container.Add(new CuiElement
-			{
-				Name = $"{WelcomeUiPanelName}.logo",
-				Parent = scrollView,
-				Components =
-				{
-					new CuiRawImageComponent { Url = "https://panels.twitch.tv/panel-1025512005-image-9ae6176b-7901-47e0-a0a2-2c16fed78df3" },
-					new CuiRectTransformComponent { AnchorMin = "0.4 0.91", AnchorMax = "0.6 0.98" }
-				}
-			});
+			AddCuiRawImage(container, scrollView, "0.4 0.91", "0.6 0.98", "https://panels.twitch.tv/panel-1025512005-image-9ae6176b-7901-47e0-a0a2-2c16fed78df3");
 			
 			y -= 0.07f;
 
@@ -421,23 +408,11 @@ namespace Oxide.Plugins
 			float col2Min = 0.34f, col2Max = 0.66f;
 			float col3Min = 0.68f, col3Max = 1f;
 
-			container.Add(new CuiLabel
-			{
-				RectTransform = { AnchorMin = $"{col1Min} {baseY}", AnchorMax = $"{col1Max} {baseY + colRowHeight}" },
-				Text = { Text = "<b>Tournament Stats:</b>", FontSize = 14, Align = TextAnchor.MiddleLeft }
-			}, scrollView);
+			AddCuiLabel(container, scrollView, $"{col1Min} {baseY}", $"{col1Max} {baseY + colRowHeight}", "<b>Tournament Stats:</b>");
 
-			container.Add(new CuiLabel
-			{
-				RectTransform = { AnchorMin = $"{col2Min} {baseY}", AnchorMax = $"{col2Max} {baseY + colRowHeight}" },
-				Text = { Text = "<b>Scoring Rules:</b>", FontSize = 14, Align = TextAnchor.MiddleLeft }
-			}, scrollView);
+			AddCuiLabel(container, scrollView, $"{col2Min} {baseY}", $"{col2Max} {baseY + colRowHeight}", "<b>Scoring Rules:</b>");
 
-			container.Add(new CuiLabel
-			{
-				RectTransform = { AnchorMin = $"{col3Min} {baseY}", AnchorMax = $"{col3Max} {baseY + colRowHeight}" },
-				Text = { Text = "<b>Kit Prices:</b>", FontSize = 14, Align = TextAnchor.MiddleLeft }
-			}, scrollView);
+			AddCuiLabel(container, scrollView, $"{col3Min} {baseY}", $"{col3Max} {baseY + colRowHeight}", "<b>Kit Prices:</b>");
 
 			y = baseY - colRowSize;
 
@@ -445,11 +420,8 @@ namespace Oxide.Plugins
 			{
 				if (i == 0)
 				{
-					container.Add(new CuiLabel
-					{
-						RectTransform = { AnchorMin = $"{col1Min} {y - colRowHeight}", AnchorMax = $"{col1Max} {y}" },
-						Text = { Text = $"• Duration: {Configuration.DurationHours} hours", FontSize = 13, Align = TextAnchor.MiddleLeft }
-					}, scrollView);
+					AddCuiLabel(container, scrollView, $"{col1Min} {y - colRowHeight}", $"{col1Max} {y}", $"• Duration: {Configuration.DurationHours} hours", 13);
+
 				}
 				else if (i == 1)
 				{
@@ -463,19 +435,13 @@ namespace Oxide.Plugins
 							: "Tournament ended";
 					}
 
-					container.Add(new CuiLabel
-					{
-						RectTransform = { AnchorMin = $"{col1Min} {y - colRowHeight}", AnchorMax = $"{col1Max} {y}" },
-						Text = { Text = $"• Time Left: {timeLeft}", FontSize = 13, Align = TextAnchor.MiddleLeft }
-					}, scrollView);
+					AddCuiLabel(container, scrollView, $"{col1Min} {y - colRowHeight}", $"{col1Max} {y}", $"• Time Left: {timeLeft}", 13);
+
 				}
 				else if (i == 2)
 				{
-					container.Add(new CuiLabel
-					{
-						RectTransform = { AnchorMin = $"{col1Min} {y - colRowHeight}", AnchorMax = $"{col1Max} {y}" },
-						Text = { Text = $"• Participants: {participants.Count}", FontSize = 13, Align = TextAnchor.MiddleLeft }
-					}, scrollView);
+					AddCuiLabel(container, scrollView, $"{col1Min} {y - colRowHeight}", $"{col1Max} {y}", $"• Participants: {participants.Count}", 13);
+
 				}
 
 				if (i < Configuration.ScoreRules.Count)
@@ -493,21 +459,15 @@ namespace Oxide.Plugins
 						_ => rule.Key
 					};
 
-					container.Add(new CuiLabel
-					{
-						RectTransform = { AnchorMin = $"{col2Min} {y - colRowHeight}", AnchorMax = $"{col2Max} {y}" },
-						Text = { Text = $"• {friendly}: {rule.Value} pts", FontSize = 13, Align = TextAnchor.MiddleLeft }
-					}, scrollView);
+					AddCuiLabel(container, scrollView, $"{col2Min} {y - colRowHeight}", $"{col2Max} {y}", $"• {friendly}: {rule.Value} pts", 13);
+
 				}
 
 				if (i < Configuration.KitPrices.Count)
 				{
 					var kit = Configuration.KitPrices.ElementAt(i);
-					container.Add(new CuiLabel
-					{
-						RectTransform = { AnchorMin = $"{col3Min} {y - colRowHeight}", AnchorMax = $"{col3Max} {y}" },
-						Text = { Text = $"• {kit.Key} Kit: {kit.Value} pts", FontSize = 13, Align = TextAnchor.MiddleLeft }
-					}, scrollView);
+					AddCuiLabel(container, scrollView, $"{col3Min} {y - colRowHeight}", $"{col3Max} {y}", $"• {kit.Key} Kit: {kit.Value} pts", 13);
+
 				}
 
 				y -= colRowSize;
@@ -522,12 +482,7 @@ namespace Oxide.Plugins
 				Text = { Text = toggleLabel, FontSize = 12, Align = TextAnchor.MiddleCenter }
 			}, $"{WelcomeUiPanelName}.main");
 
-			container.Add(new CuiButton
-			{
-				Button = { Color = "0.7 0.2 0.2 1", Command = "welcomeui_close" },
-				RectTransform = { AnchorMin = "0.51 0.01", AnchorMax = "0.65 0.06" },
-				Text = { Text = "Close", FontSize = 14, Align = TextAnchor.MiddleCenter }
-			}, $"{WelcomeUiPanelName}.main");
+			AddCuiButton(container, $"{WelcomeUiPanelName}.main", "0.51 0.01", "0.65 0.06", "Close", "welcomeui_close", "0.7 0.2 0.2 1");
 			
 			y -= 0.07f;
 
@@ -567,6 +522,29 @@ namespace Oxide.Plugins
 			ShowWelcomeUI(player);
 		}
 		
+		private void AddCuiInput(CuiElementContainer container, string parent, string label, string key, string value, float xLabel, float xInput, float y)
+			{
+				AddCuiLabel(container, parent, $"{xLabel} {y}", $"{xLabel + 0.2f} {y + 0.035f}", label);
+
+				AddCuiPanel(container, parent, $"{xInput} {y}", $"{xInput + 0.2f} {y + 0.035f}", "0.8 0.8 0.8 0.3");
+
+				container.Add(new CuiElement
+				{
+					Name = $"{key}Input",
+					Parent = parent,
+					Components =
+					{
+						new CuiRectTransformComponent { AnchorMin = $"{xInput} {y}", AnchorMax = $"{xInput + 0.2f} {y + 0.035f}" },
+						new CuiInputFieldComponent
+						{
+							Text = value,
+							Align = TextAnchor.MiddleLeft,
+							Command = $"config_set {key}"
+						}
+					}
+				});
+			}
+		
 		private void ShowConfigUI(BasePlayer player)
 		{
 			CuiHelper.DestroyUi(player, ConfigUiPanelName);
@@ -591,11 +569,7 @@ namespace Oxide.Plugins
 				RectTransform = { AnchorMin = "0 0.93", AnchorMax = "1 1" }
 			}, $"{ConfigUiPanelName}.main", $"{ConfigUiPanelName}.header");
 
-			container.Add(new CuiLabel
-			{
-				RectTransform = { AnchorMin = "0.02 0", AnchorMax = "0.9 1" },
-				Text = { Text = "⚙ RustRoyale Configuration", FontSize = 18, Align = TextAnchor.MiddleLeft }
-			}, $"{ConfigUiPanelName}.header");
+			AddCuiLabel(container, $"{ConfigUiPanelName}.header", "0.02 0", "0.9 1", "⚙ RustRoyale Configuration", 18);
 
 			container.Add(new CuiButton
 			{
@@ -607,42 +581,6 @@ namespace Oxide.Plugins
 			float y = 0.87f;
 			float xLeftLabel = 0.05f, xLeftInput = 0.25f;
 			float xRightLabel = 0.55f, xRightInput = 0.75f;
-
-			void AddInput(string label, string key, string value)
-			{
-				float xLabel = xLeftLabel;
-				float xInput = xLeftInput + 0.02f;
-
-				container.Add(new CuiLabel
-				{
-					RectTransform = { AnchorMin = $"{xLabel} {y}", AnchorMax = $"{xLabel + 0.2f} {y + 0.035f}" },
-					Text = { Text = label, FontSize = 14, Align = TextAnchor.MiddleLeft }
-				}, $"{ConfigUiPanelName}.main");
-
-				container.Add(new CuiPanel
-				{
-					Image = { Color = "0.8 0.8 0.8 0.3" },
-					RectTransform = { AnchorMin = $"{xInput} {y}", AnchorMax = $"{xInput + 0.2f} {y + 0.035f}" }
-				}, $"{ConfigUiPanelName}.main");
-
-				container.Add(new CuiElement
-				{
-					Name = $"{key}Input",
-					Parent = $"{ConfigUiPanelName}.main",
-					Components =
-					{
-						new CuiRectTransformComponent { AnchorMin = $"{xInput} {y}", AnchorMax = $"{xInput + 0.2f} {y + 0.035f}" },
-						new CuiInputFieldComponent
-						{
-							Text = value,
-							Align = TextAnchor.MiddleLeft,
-							Command = $"config_set {key}"
-						}
-					}
-				});
-
-				y -= 0.05f;
-			}
 
 			void AddToggle(string label, string key, bool value)
 			{
@@ -671,23 +609,21 @@ namespace Oxide.Plugins
 				y -= 0.05f;
 			}
 
-			AddInput("Timezone", "Timezone", Configuration.Timezone);
-			AddInput("StartDay", "StartDay", Configuration.StartDay);
-			AddInput("StartHour", "StartHour", Configuration.StartHour.ToString());
-			AddInput("StartMinute", "StartMinute", Configuration.StartMinute.ToString());
-			AddInput("DurationHours", "DurationHours", Configuration.DurationHours.ToString());
-			AddInput("TopPlayersToTrack", "TopPlayersToTrack", Configuration.TopPlayersToTrack.ToString());
-			AddInput("JoinCutoffHours", "JoinCutoffHours", Configuration.JoinCutoffHours.ToString());
-			AddInput("AnimalKillDistance", "AnimalKillDistance", Configuration.AnimalKillDistance.ToString());
+			AddCuiInput(container, $"{ConfigUiPanelName}.main", "Timezone", "Timezone", Configuration.Timezone, xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+			AddCuiInput(container, $"{ConfigUiPanelName}.main", "StartDay", "StartDay", Configuration.StartDay, xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+			AddCuiInput(container, $"{ConfigUiPanelName}.main", "StartHour", "StartHour", Configuration.StartHour.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+			AddCuiInput(container, $"{ConfigUiPanelName}.main", "StartMinute", "StartMinute", Configuration.StartMinute.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+			AddCuiInput(container, $"{ConfigUiPanelName}.main", "DurationHours", "DurationHours", Configuration.DurationHours.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+			AddCuiInput(container, $"{ConfigUiPanelName}.main", "TopPlayersToTrack", "TopPlayersToTrack", Configuration.TopPlayersToTrack.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+			AddCuiInput(container, $"{ConfigUiPanelName}.main", "JoinCutoffHours", "JoinCutoffHours", Configuration.JoinCutoffHours.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+			AddCuiInput(container, $"{ConfigUiPanelName}.main", "AnimalKillDistance", "AnimalKillDistance", Configuration.AnimalKillDistance.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+			AddCuiInput(container, $"{ConfigUiPanelName}.main", "PenaltyPointsOnExit", "PenaltyPointsOnExit", Configuration.PenaltyPointsOnExit.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
 
 			AddToggle("Show Welcome Message", "ShowWelcomeUI", Configuration.ShowWelcomeUI);
 			AddToggle("AutoStartEnabled", "AutoStartEnabled", Configuration.AutoStartEnabled);
 			AddToggle("AutoEnrollEnabled", "AutoEnrollEnabled", Configuration.AutoEnrollEnabled);
 			AddToggle("PenaltyOnExitEnabled", "PenaltyOnExitEnabled", Configuration.PenaltyOnExitEnabled);
 
-			AddInput("PenaltyPointsOnExit", "PenaltyPointsOnExit", Configuration.PenaltyPointsOnExit.ToString());
-
-			// ScoreRules + KitPrices
 			float groupY = 0.87f;
 
 			foreach (var kv in Configuration.ScoreRules)
@@ -758,7 +694,6 @@ namespace Oxide.Plugins
 				groupY -= 0.05f;
 			}
 
-			// Save & Cancel
 			container.Add(new CuiButton
 			{
 				Button = { Command = "config_save", Color = "0.2 0.6 0.2 1" },
@@ -832,9 +767,7 @@ namespace Oxide.Plugins
 			pendingConfig.Clear();
 			CloseConfigUI(player);
 		}
-		
 	#endregion
-
     #region Permissions
         private const string AdminPermission = "rustroyale.admin";
 
@@ -866,9 +799,7 @@ namespace Oxide.Plugins
             }
             return true;
         }
-    
     #endregion
-
     #region Data Logging
         private string DataDirectory => $"{Interface.Oxide.DataDirectory}/RustRoyale";
         private string currentTournamentFile;
@@ -955,7 +886,6 @@ namespace Oxide.Plugins
             LogEvent(participantsLog);
         }
     #endregion
-	
 	#region On Start
 		private void OnServerInitialized()
 		{
@@ -965,7 +895,6 @@ namespace Oxide.Plugins
 			}
 		}
 	#endregion
-
     #region Schedule Tournament
         private readonly Dictionary<ulong, PlayerStats> playerStats = new Dictionary<ulong, PlayerStats>();
         private readonly HashSet<ulong> participants = new HashSet<ulong>();
@@ -1200,11 +1129,8 @@ namespace Oxide.Plugins
 				// Puts($"[Debug] Tournament countdown: {FormatTimeRemaining(remainingTime)} remaining.");
             });
         }
-
     #endregion
-
     #region Tournament Logic
-	
 		private void ResumeInterruptedTournament()
 		{
 			EnsureDataDirectory();
@@ -1235,7 +1161,7 @@ namespace Oxide.Plugins
 				);
 
 				tournamentStartTime = startUtc;
-				tournamentEndTime   = startUtc.AddHours(Configuration.DurationHours);
+				tournamentEndTime = startUtc.AddHours(Configuration.DurationHours);
 				isTournamentRunning = true;
 
 				if (DateTime.UtcNow >= tournamentEndTime)
@@ -1386,7 +1312,7 @@ namespace Oxide.Plugins
 					team.teamLeader == userId)
 				{
 					teamLeaderNames[teamId] = basePlayer.displayName;
-					SaveTeamLeaderNames(); // ✅ Persist the new value
+					SaveTeamLeaderNames();
 					Puts($"[Debug] Leader {basePlayer.displayName} cached for team {teamId} via GetGroupKey()");
 				}
 
@@ -1524,7 +1450,7 @@ namespace Oxide.Plugins
 				if (!teamLeaderNames.ContainsKey(player.currentTeam))
 				{
 					teamLeaderNames[player.currentTeam] = player.displayName;
-					SaveTeamLeaderNames(); // Optionally persist it right away
+					SaveTeamLeaderNames();
 					Puts($"[Debug] Cached leader name '{player.displayName}' for team {player.currentTeam}");
 				}
 			}
@@ -1558,7 +1484,12 @@ namespace Oxide.Plugins
 
 			timer.Once(2f, () =>
 			{
-				if (player != null && player.IsConnected && Configuration.ShowWelcomeUI && !welcomeOptOut.Contains(player.userID))
+				if (player == null || !player.IsConnected)
+					return;
+
+				OnPlayerInit(player); // Always initialize player regardless of welcome UI
+
+				if (Configuration.ShowWelcomeUI && !welcomeOptOut.Contains(player.userID))
 				{
 					Puts($"[Debug] Showing welcome UI for {player.displayName} ({player.UserIDString})");
 					ShowWelcomeUI(player);
@@ -1573,7 +1504,8 @@ namespace Oxide.Plugins
                 playerNameCache.TryRemove(player.userID, out _);
             }
         }
-
+	#endregion
+	#region DeathHandlers	
         private readonly ConcurrentDictionary<ulong, DateTime> recentDeaths = new ConcurrentDictionary<ulong, DateTime>();
         private const int RecentDeathWindowSeconds = 5;
 
@@ -1585,42 +1517,149 @@ namespace Oxide.Plugins
 			}
 		}
 		
-		private static readonly HashSet<string> AnimalPrefabs = new HashSet<string>
+		private static readonly Dictionary<string, string> NpcNameMap = new Dictionary<string, string>
 		{
-			"wolf","boar","bear","polar_bear","stag","deer","chicken","horse","crocodile","panther","tiger","snake"
+			{ "scientist", "Scientist" },
+			{ "scientistnpc", "Scientist" },
+			{ "scientistnpcnew", "Scientist" },
+			{ "npcmurderer", "Murderer" },
+			{ "scarecrow", "Scarecrow" },
+			{ "tunneldweller", "Tunnel Dweller" },
+			{ "underwaterdweller", "Underwater Dweller" },
+			{ "bandit_guard", "Bandit Guard" },
+			{ "npc_bandit_guard", "Bandit Guard" },
+			{ "npc_player", "NPC Player" },
+		};
+		
+		private string GetFriendlyNpcName(string prefab)
+		{
+			if (string.IsNullOrEmpty(prefab)) return "Unknown";
+			var lower = prefab.ToLowerInvariant();
+
+			foreach (var kvp in NpcNameMap)
+			{
+				if (lower == kvp.Key || lower.StartsWith(kvp.Key + ".") || lower.StartsWith(kvp.Key + "_"))
+					return kvp.Value;
+			}
+
+			return prefab;
+		}
+		
+		private static readonly Dictionary<string, string> TrapNameMap = new Dictionary<string, string>
+		{
+			{ "autoturret_deployed",         "autoturret" },
+			{ "guntrap",                     "guntrap" },
+			{ "flameturret.deployed",        "flameturret" },
+			{ "beartrap",                    "bear trap" },
+			{ "wooden_floor_spike_cluster",  "floor spike" },
+			{ "landmine",                    "landmine" },
+			{ "barricade",                   "barricade" }
+		};
+		
+		private string GetFriendlyTrapName(string prefabName)
+		{
+			if (string.IsNullOrEmpty(prefabName)) return "Unknown";
+			return TrapNameMap.TryGetValue(prefabName.ToLowerInvariant(), out var friendly) ? friendly : prefabName;
+		}
+		
+		private static readonly Dictionary<string, string> AnimalNameMap = new Dictionary<string, string>
+		{
+			{ "wolf",        "Wolf" },
+			{ "boar",        "Boar" },
+			{ "bear",        "Bear" },
+			{ "polar_bear",  "Polar Bear" },
+			{ "polarbear",   "Polar Bear" },
+			{ "stag",        "Deer" },
+			{ "deer",        "Deer" },
+			{ "chicken",     "Chicken" },
+			{ "horse",       "Horse" },
+			{ "crocodile",   "Crocodile" },
+			{ "panther",     "Panther" },
+			{ "tiger",       "Tiger" },
+			{ "snake",       "Snake" }
 		};
 
 		private bool IsAnimalKill(string prefabName)
 		{
+			if (string.IsNullOrEmpty(prefabName)) return false;
 			var lower = prefabName.ToLowerInvariant();
-			return AnimalPrefabs.Any(lower.Contains);
+
+			bool match = AnimalNameMap.Keys.Any(animal =>
+				lower == animal ||
+				lower.StartsWith(animal + ".") ||
+				lower.StartsWith(animal + "_") ||
+				lower.StartsWith(animal + "2"));
+
+			if (!match)
+				Puts($"[Debug] Skipped prefab '{lower}' in IsAnimalKill()");
+
+			return match;
+		}
+		
+		private string GetFriendlyAnimalName(string prefab)
+		{
+			if (string.IsNullOrEmpty(prefab)) return "Unknown";
+
+			string lower = prefab.ToLowerInvariant();
+
+			foreach (var kvp in AnimalNameMap)
+			{
+				if (lower == kvp.Key ||
+					lower.StartsWith(kvp.Key + ".") ||
+					lower.StartsWith(kvp.Key + "_") ||
+					lower.StartsWith(kvp.Key + "2"))
+				{
+					return kvp.Value;
+				}
+			}
+
+			return prefab;
 		}
 
 		private void OnPlayerDeath(BasePlayer victim, HitInfo info)
 		{
 			if (!isTournamentRunning || victim == null)
-			{
-				Puts("[Debug] Tournament is not running or victim is null.");
 				return;
-			}
 
+			if (IsRecentDeath(victim))
+				return;
+
+			var attacker = ResolveAttacker(victim, info);
+			var entity = info?.Initiator as BaseCombatEntity;
+
+			if (HandleHeliOrBradleyKill(victim, entity, info)) return;
+			if (HandleNpcOrUnownedEntityKill(victim, attacker, entity, info)) return;
+			if (HandlePlayerKill(victim, attacker, info)) return;
+			if (HandleTrapKill(victim, entity, info)) return;
+			if (HandleNpcKilledByPlayer(victim, attacker, info)) return;
+			if (HandleNpcKilledByTrap(victim, entity, info)) return;
+			if (HandleSelfInflicted(victim, attacker, info)) return;
+
+			Puts($"[Debug] ❌ No handler matched for {victim.displayName}'s death. Entity: {entity?.ShortPrefabName ?? "unknown"}");
+			lastDamageRecords.Remove(victim.userID);
+		}
+		
+		private bool IsRecentDeath(BasePlayer victim)
+		{
 			if (recentDeaths.TryGetValue(victim.userID, out var lastDeathTime) &&
 				(DateTime.UtcNow - lastDeathTime).TotalSeconds < RecentDeathWindowSeconds)
 			{
 				Puts($"[Debug] Ignoring duplicate death event for {victim.displayName}. Last death: {lastDeathTime}.");
-				return;
+				return true;
 			}
 
 			recentDeaths[victim.userID] = DateTime.UtcNow;
+			return false;
+		}
 
+		private BasePlayer ResolveAttacker(BasePlayer victim, HitInfo info)
+		{
 			var attacker = info?.InitiatorPlayer;
-			
 			if (attacker == null || attacker == victim)
 			{
 				if (lastDamageRecords.TryGetValue(victim.userID, out var record))
 				{
 					float timeSinceLastHit = UnityEngine.Time.realtimeSinceStartup - record.TimeStamp;
-
 					if (timeSinceLastHit <= 30f)
 					{
 						attacker = record.Attacker;
@@ -1628,338 +1667,225 @@ namespace Oxide.Plugins
 					}
 				}
 			}
+			return attacker;
+		}
 
-			var initiatorEntity = info?.Initiator as BaseCombatEntity;
+		private bool HandleHeliOrBradleyKill(BasePlayer victim, BaseCombatEntity entity, HitInfo info)
+		{
+			if (entity == null || !participants.Contains(victim.userID)) return false;
 
-			string attackerName = attacker?.displayName ?? "Unknown";
-			string entityName = initiatorEntity?.ShortPrefabName ?? "Unknown";
-			ulong ownerId = initiatorEntity?.OwnerID ?? 0;
-			string ownerName = ownerId != 0 ? GetPlayerName(ownerId) : "None";
+			string prefab = entity.ShortPrefabName ?? "";
+			if (!prefab.Contains("helicopter") && !prefab.Contains("bradley")) return false;
 
-			Puts($"[Debug] Death event detected: Victim={victim.displayName} (Type={victim.ShortPrefabName}), Attacker={attackerName}, Entity={entityName}, Owner={ownerName}.");
+			string type = prefab.Contains("helicopter") ? "Helicopter" : "Bradley";
 
-            // Handle deaths caused by helicopters or Bradley tanks
-            if (initiatorEntity != null && participants.Contains(victim.userID))
-            {
-                string entityType = null;
-
-                // Ensure initiatorEntity's prefab name is checked
-                if (entityName.Contains("helicopter", StringComparison.OrdinalIgnoreCase))
-                {
-                    entityType = "Helicopter";
-                }
-                else if (entityName.Contains("bradley", StringComparison.OrdinalIgnoreCase))
-                {
-                    entityType = "Bradley";
-                }
-
-                if (!string.IsNullOrEmpty(entityType))
-                {
-                    DamageType? majorityDamageType = info?.damageTypes?.GetMajorityDamageType();
-                    string damageTypeString = majorityDamageType.HasValue ? majorityDamageType.Value.ToString() : "Unknown";
-
-                    Puts($"[Debug] Helicopter/Bradley kill detected: Victim={victim.displayName}, Entity={entityType}, DamageType={damageTypeString}, EntityName={entityName}");
-
-                    if (Configuration.ScoreRules.TryGetValue("BRUH", out int points))
-                    {
-                        UpdatePlayerScore(
-                            victim.userID,
-                            "BRUH",
-                            $"getting defeated by a {entityType}",
-                            victim,
-                            info,
-                            entityName: entityType
-                        );
-
-                        Puts($"[Debug] {victim.displayName} lost points for being defeated by a {entityType}. Total score updated.");
-                    }
-
-                    return;
-                }
-                else
-                {
-                    DamageType? majorityDamageType = info?.damageTypes?.GetMajorityDamageType();
-                    string damageTypeString = majorityDamageType.HasValue ? majorityDamageType.Value.ToString() : "Unknown";
-
-                    Puts($"[Debug] Unhandled entity type in Helicopter/Bradley check. Victim={victim.displayName}, EntityName={entityName ?? "Unknown"}, DamageType={damageTypeString}");
-                }
-            }
-			
-			    Puts($"[Debug] ❌ ENT Kills Player Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
-
-            // Handle deaths caused by NPCs or unowned entities (BRUH)
-            if (
-					(attacker != null && attacker.IsNpc) 
-					|| (initiatorEntity != null && ownerId == 0 && (attacker == null || attacker.IsNpc))
-				)
-            {
-                if (attacker != null && !string.IsNullOrEmpty(attacker.ShortPrefabName))
-                {
-                    attackerName = attacker.ShortPrefabName;
-                }
-                else if (initiatorEntity is BaseNpc npc && !string.IsNullOrEmpty(npc.ShortPrefabName))
-                {
-                    attackerName = npc.ShortPrefabName;
-                }
-                else if (initiatorEntity != null && string.IsNullOrEmpty(attackerName))
-                {
-                    attackerName = initiatorEntity.ShortPrefabName;
-                }
-
-                if (participants.Contains(victim.userID) && Configuration.ScoreRules.TryGetValue("BRUH", out int points))
-                {
-                    UpdatePlayerScore(
-                        victim.userID,
-                        "BRUH",
-                        $"being defeated by {attackerName}",
-                        victim,
-                        info,
-                        entityName: attackerName
-                    );
-
-                    Puts($"[Debug] {victim.displayName} lost points for being defeated by {attackerName}.");
-                }
-
-                return;
-            }
-			
-			    Puts($"[Debug] ❌ NPC Kills Player Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
-
-            // Handle deaths caused by traps, turrets, or sentries
-            if (initiatorEntity != null && participants.Contains(victim.userID))
-            {
-                string friendlyEntityName = entityName switch
-                {
-					"autoturret_deployed"        => "autoturret",
-					"guntrap"                    => "guntrap",
-					"flameturret.deployed"       => "flameturret",
-					"beartrap"                   => "bear trap",
-					"wooden_floor_spike_cluster" => "floor spike",
-					"landmine"                   => "landmine",
-					"barricade"                  => "barricade",
-					_                            => entityName
-				};
-
-                Puts($"[Debug] Trap/Turret kill detected: Entity={friendlyEntityName}, OwnerID={ownerId}, OwnerName={ownerName}");
-
-                if (ownerId != 0 && participants.Contains(ownerId))
-                {
-                    if (Configuration.ScoreRules.TryGetValue("KILL", out int pointsForOwner) &&
-                        Configuration.ScoreRules.TryGetValue("DEAD", out int pointsForVictim))
-                    {
-                        UpdatePlayerScore(
-                            victim.userID,
-                            "DEAD",
-                            $"being killed by {friendlyEntityName} owned by {ownerName}",
-                            victim,
-                            info,
-                            attackerName: ownerName,
-                            entityName: friendlyEntityName
-                        );
-
-                        UpdatePlayerScore(
-                            ownerId,
-                            "KILL",
-                            $"eliminating {victim.displayName} with {friendlyEntityName}",
-                            victim,
-                            info,
-                            attackerName: ownerName,
-                            entityName: friendlyEntityName,
-                            reverseMessage: true
-                        );
-
-                        Puts($"[Debug] {victim.displayName} lost points for being killed by {friendlyEntityName} owned by {ownerName}.");
-                        Puts($"[Debug] {ownerName} gained points for killing {victim.displayName} with {friendlyEntityName}.");
-                    }
-                }
-                else
-                {
-                    if (Configuration.ScoreRules.TryGetValue("JOKE", out int jokePoints))
-                    {
-                        UpdatePlayerScore(
-                            victim.userID,
-                            "JOKE",
-                            $"death caused by an unowned {friendlyEntityName}",
-                            victim,
-                            info,
-                            entityName: friendlyEntityName
-                        );
-
-                        Puts($"[Debug] {victim.displayName} died due to an unowned {friendlyEntityName}.");
-                    }
-                }
-
-                return;
-            }
-			
-			    Puts($"[Debug] ❌ Death By Traps Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
-			
-			// Handle NPCs killed by player
-			if (victim.IsNpc && attacker != null)
+			if (Configuration.ScoreRules.TryGetValue("BRUH", out int points))
 			{
-				bool isParticipant = participants.Contains(attacker.userID);
-				bool hasScoreRule = Configuration.ScoreRules.TryGetValue("NPC", out int points);
-
-				Puts($"[Debug] Checking NPC kill: Victim={victim.ShortPrefabName}, Attacker={attacker.displayName}, In Tournament={isParticipant}, Score Rule Exists={hasScoreRule}");
-				Puts($"[Debug] Available ScoreRules: {string.Join(", ", Configuration.ScoreRules.Keys)}");
-
-				if (isParticipant)
-				{
-					if (hasScoreRule)
-					{
-						Puts($"[Debug] Awarding {points} points for killing an NPC ({victim.ShortPrefabName}) to {attacker.displayName}.");
-
-						UpdatePlayerScore(
-							attacker.userID,
-							"NPC",
-							$"eliminating an NPC ({victim.ShortPrefabName})",
-							victim,
-							info
-						);
-
-						Puts($"[Debug] Score should now be updated for {attacker.displayName}.");
-					}
-					else
-					{
-						Puts("[Debug] No score rule found for NPC kills.");
-					}
-				}
-				else
-				{
-					Puts($"[Debug] {attacker.displayName} is not a tournament participant, skipping scoring.");
-				}
-				return;
+				UpdatePlayerScore(victim.userID, "BRUH", $"getting defeated by a {type}", victim, info, entityName: type);
+				Puts($"[Debug] {victim.displayName} lost points for being defeated by a {type}.");
 			}
-			
-			    Puts($"[Debug] ❌ NPC Killed By Player Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
+			return true;
+		}
 
-            // Handle NPCs killed by player-owned turrets
-            if (initiatorEntity != null && victim.IsNpc && ownerId != 0 && participants.Contains(ownerId))
-            {
-                string friendlyEntityName = entityName switch
-                {
-					"autoturret_deployed"        => "autoturret",
-					"guntrap"                    => "guntrap",
-					"flameturret.deployed"       => "flameturret",
-					"beartrap"                   => "bear trap",
-					"wooden_floor_spike_cluster" => "floor spike",
-					"landmine"                   => "landmine",
-					"barricade"                  => "barricade",
-					_                            => entityName
-				};
+		private bool HandleNpcOrUnownedEntityKill(BasePlayer victim, BasePlayer attacker, BaseCombatEntity entity, HitInfo info)
+		{
+			ulong ownerId = entity?.OwnerID ?? 0;
+			bool isNpcKill = attacker != null && attacker.IsNpc;
+			bool isUnownedEntity = entity != null && ownerId == 0 && (attacker == null || attacker.IsNpc);
 
-                Puts($"[Debug] NPC kill detected: Victim={victim.displayName} (NPC), Entity={friendlyEntityName}, Owner={ownerName}");
+			if (!isNpcKill && !isUnownedEntity) return false;
 
-                if (Configuration.ScoreRules.TryGetValue("NPC", out int pointsForOwner))
-                {
-                    UpdatePlayerScore(
-                        ownerId,
-                        "NPC",
-                        $"eliminating an NPC ({victim.ShortPrefabName}) with {friendlyEntityName}",
-                        victim,
-                        info,
-                        attackerName: ownerName,
-                        entityName: friendlyEntityName
-                    );
+			string attackerName = attacker?.ShortPrefabName ?? entity?.ShortPrefabName ?? "Unknown";
+			attackerName = GetFriendlyNpcName(attackerName);
 
-                    Puts($"[Debug] {ownerName} earned points for killing an NPC ({victim.ShortPrefabName}) with {friendlyEntityName}.");
-                }
+			if (participants.Contains(victim.userID) && Configuration.ScoreRules.TryGetValue("BRUH", out int points))
+			{
+				UpdatePlayerScore(victim.userID, "BRUH", $"being defeated by {attackerName}", victim, info, entityName: attackerName);
+				Puts($"[Debug] {victim.displayName} lost points for being defeated by {attackerName}.");
+			}
+			return true;
+		}
 
-                return;
-            }
-			
-			    Puts($"[Debug] ❌ NPC KilledBy Player Traps Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
+		private bool HandlePlayerKill(BasePlayer victim, BasePlayer attacker, HitInfo info)
+		{
+			if (attacker == null || !participants.Contains(attacker.userID) || !participants.Contains(victim.userID))
+				return false;
 
-            // Handle self-inflicted deaths (e.g., falling, drowning, explosions)
-            if ((attacker == null || attacker == victim) && participants.Contains(victim.userID))
-            {
-                string cause = info?.damageTypes?.GetMajorityDamageType().ToString() ?? "unknown cause";
+			if (Configuration.ScoreRules.TryGetValue("DEAD", out int pointsForVictim) &&
+				Configuration.ScoreRules.TryGetValue("KILL", out int pointsForAttacker))
+			{
+				UpdatePlayerScore(victim.userID, "DEAD", $"killed by {attacker.displayName}", victim);
+				UpdatePlayerScore(attacker.userID, "KILL", $"eliminated {victim.displayName}", victim);
+				Puts($"[Debug] {attacker.displayName} killed {victim.displayName}.");
+			}
 
-                if (Configuration.ScoreRules.TryGetValue("JOKE", out int points))
-                {
-                    UpdatePlayerScore(
-                        victim.userID,
-                        "JOKE",
-                        $"self-inflicted death ({cause})",
-                        victim,
-                        info
-                    );
+			return true;
+		}
 
-                    Puts($"[Debug] {victim.displayName} died from {cause} (self-inflicted).");
-                }
+		private bool HandleTrapKill(BasePlayer victim, BaseCombatEntity entity, HitInfo info)
+		{
+			if (entity == null || !participants.Contains(victim.userID)) return false;
 
-                return;
-            }
+			string entityName = entity.ShortPrefabName ?? "Unknown";
+			string friendlyName = GetFriendlyTrapName(entityName);
+			ulong ownerId = entity.OwnerID;
+			string ownerName = ownerId != 0 ? GetPlayerName(ownerId) : "Unknown";
 
-            // Handle player kills another player
-            if (attacker != null && participants.Contains(attacker.userID) && participants.Contains(victim.userID))
-            {
-                if (Configuration.ScoreRules.TryGetValue("DEAD", out int pointsForVictim) &&
-                    Configuration.ScoreRules.TryGetValue("KILL", out int pointsForAttacker))
-                {
-                    UpdatePlayerScore(victim.userID, "DEAD", $"killed by {attackerName}", victim);
-                    UpdatePlayerScore(attacker.userID, "KILL", $"eliminated {victim.displayName}", victim);
-                    Puts($"[Debug] {attackerName} killed {victim.displayName}.");
-                }
+			if (ownerId == victim.userID && Configuration.ScoreRules.TryGetValue("BRUH", out int bruhPoints))
+			{
+				UpdatePlayerScore(victim.userID, "BRUH", $"being defeated by their own {friendlyName}", victim, info, attackerName: ownerName, entityName: friendlyName);
+				return true;
+			}
 
-                return;
-            }
-			
-			    Puts($"[Debug] ❌ Player Kills Player Handler was skipped. Victim: {victim.ShortPrefabName}, IsNpc={victim.IsNpc}, Attacker={attacker?.displayName ?? "None"}");
+			if (ownerId != 0 && participants.Contains(ownerId))
+			{
+				if (Configuration.ScoreRules.TryGetValue("KILL", out int ptsAttacker) &&
+					Configuration.ScoreRules.TryGetValue("DEAD", out int ptsVictim))
+				{
+					UpdatePlayerScore(victim.userID, "DEAD", $"being killed by {friendlyName} owned by {ownerName}", victim, info, attackerName: ownerName, entityName: friendlyName);
+					UpdatePlayerScore(ownerId, "KILL", $"eliminating {victim.displayName} with {friendlyName}", victim, info, attackerName: ownerName, entityName: friendlyName, reverseMessage: true);
+				}
+				return true;
+			}
 
-			lastDamageRecords.Remove(victim.userID);
+			if (Configuration.ScoreRules.TryGetValue("JOKE", out int jokePoints))
+			{
+				UpdatePlayerScore(victim.userID, "JOKE", $"death caused by an unowned {friendlyName}", victim, info, entityName: friendlyName);
+				return true;
+			}
 
-        }
+			return false;
+		}
 
+		private bool HandleNpcKilledByPlayer(BasePlayer victim, BasePlayer attacker, HitInfo info)
+		{
+			if (!victim.IsNpc || attacker == null || !participants.Contains(attacker.userID))
+				return false;
+
+			if (Configuration.ScoreRules.TryGetValue("NPC", out int points))
+			{
+				string npcName = GetFriendlyNpcName(victim.ShortPrefabName);
+				UpdatePlayerScore(attacker.userID, "NPC", $"eliminating an NPC ({npcName})", victim, info, entityName: npcName);
+				return true;
+			}
+
+			return false;
+		}
+
+		private bool HandleNpcKilledByTrap(BasePlayer victim, BaseCombatEntity entity, HitInfo info)
+		{
+			if (!victim.IsNpc || entity == null) return false;
+
+			ulong ownerId = entity.OwnerID;
+			if (ownerId == 0 || !participants.Contains(ownerId)) return false;
+
+			string trapName = GetFriendlyTrapName(entity.ShortPrefabName ?? "Unknown");
+			string npcName = GetFriendlyNpcName(victim.ShortPrefabName ?? "Unknown");
+			string ownerName = GetPlayerName(ownerId);
+
+			if (Configuration.ScoreRules.TryGetValue("NPC", out int points))
+			{
+				UpdatePlayerScore(ownerId, "NPC", $"eliminating an NPC ({npcName}) with {trapName}", victim, info, attackerName: ownerName, entityName: npcName);
+				return true;
+			}
+
+			return false;
+		}
+
+		private bool HandleSelfInflicted(BasePlayer victim, BasePlayer attacker, HitInfo info)
+		{
+			if (attacker != null && attacker != victim)
+				return false;
+
+			if (!participants.Contains(victim.userID))
+				return false;
+
+			string cause = info?.damageTypes?.GetMajorityDamageType().ToString() ?? "unknown cause";
+
+			if (Configuration.ScoreRules.TryGetValue("JOKE", out int points))
+			{
+				UpdatePlayerScore(victim.userID, "JOKE", $"self-inflicted death ({cause})", victim, info);
+				Puts($"[Debug] {victim.displayName} died from {cause} (self-inflicted).");
+				return true;
+			}
+
+			return false;
+		}
     #endregion
-
 	#region OnEntityDeath
-
 		private void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
 		{
-			if (!isTournamentRunning) return;
-
-			// Handle player kills Heli or Bradley
-			if (entity.ShortPrefabName.Contains("helicopter") ||
-				entity.ShortPrefabName.Contains("bradley"))
-			{
-				var killer = info?.InitiatorPlayer;
-				if (killer != null && participants.Contains(killer.userID)
-					&& Configuration.ScoreRules.TryGetValue("ENT", out int entPts))
-				{
-					string entName = entity.ShortPrefabName.Contains("helicopter") ? "Helicopter" : "Bradley";
-					UpdatePlayerScore(killer.userID, "ENT", $"destroying a {entName}", null, info, entityName: entName);
-					Puts($"[Debug] {killer.displayName} earned {entPts} point(s) for downing a {entName}.");
-				}
+			if (!isTournamentRunning || entity == null || string.IsNullOrEmpty(entity.ShortPrefabName))
 				return;
-			}
 
-			// Handle player kills Animal over Long Distance
-			var victim = entity as BaseNpc;
-			if (victim == null || !IsAnimalKill(victim.ShortPrefabName)) return;
+			if (HandleDeathByBradleyOrHelicopter(entity, info)) return;
+			if (HandleLongDistanceAnimalKill(entity, info)) return;
 
-			var killer2 = info?.InitiatorPlayer;
-			if (killer2 == null || !participants.Contains(killer2.userID)) return;
-
-			float dist = Vector3.Distance(killer2.transform.position, victim.transform.position);
-			if (dist <= Configuration.AnimalKillDistance) return;
-
-			if (Configuration.ScoreRules.TryGetValue("WHY", out int whyPts))
-			{
-				UpdatePlayerScore(
-					killer2.userID,
-					"WHY",
-					$"killing an animal ({victim.ShortPrefabName}) from over {Configuration.AnimalKillDistance} m away",
-					null,
-					info);
-				Puts($"[Debug] Awarded {whyPts} pt(s) to {killer2.displayName} for {victim.ShortPrefabName} kill at {dist:F1} m");
-			}
+			Puts($"[Debug] ❌ No OnEntityDeath handler matched for entity: {entity.ShortPrefabName}");
 		}
-	
+		
+		private bool HandleDeathByBradleyOrHelicopter(BaseCombatEntity entity, HitInfo info)
+		{
+			string prefabName = entity.ShortPrefabName.ToLowerInvariant();
+
+			if (!prefabName.Contains("helicopter") && !prefabName.Contains("bradley"))
+				return false;
+
+			var killer = info?.InitiatorPlayer;
+			if (killer == null || !participants.Contains(killer.userID))
+				return false;
+
+			if (!Configuration.ScoreRules.TryGetValue("ENT", out int points))
+				return false;
+
+			string entityType = prefabName.Contains("helicopter") ? "Helicopter" : "Bradley";
+
+			UpdatePlayerScore(
+				killer.userID,
+				"ENT",
+				$"destroying a {entityType}",
+				null,
+				info,
+				entityName: entityType
+			);
+
+			Puts($"[Debug] {killer.displayName} earned {points} point(s) for downing a {entityType}.");
+			return true;
+		}
+		
+		private bool HandleLongDistanceAnimalKill(BaseCombatEntity entity, HitInfo info)
+		{
+			if (!IsAnimalKill(entity.ShortPrefabName))
+				return false;
+
+			var killer = info?.InitiatorPlayer;
+			if (killer == null || !participants.Contains(killer.userID))
+				return false;
+
+			float distance = Vector3.Distance(killer.transform.position, entity.transform.position);
+			if (distance <= Configuration.AnimalKillDistance)
+				return false;
+
+			if (!Configuration.ScoreRules.TryGetValue("WHY", out int points))
+				return false;
+
+			string animalName = GetFriendlyAnimalName(entity.ShortPrefabName);
+
+			UpdatePlayerScore(
+				killer.userID,
+				"WHY",
+				$"killing an animal ({animalName}) from {distance:F1} meters away",
+				null,
+				info,
+				entityName: animalName,
+				distance: distance
+			);
+
+			Puts($"[Debug] Awarded {points} pt(s) to {killer.displayName} for {animalName} kill at {distance:F1} m");
+			return true;
+		}
 	#endregion
-
     #region Score Handling
-
         private string GetPlayerName(ulong userId)
         {
             if (playerNameCache.TryGetValue(userId, out var cachedName) && !string.IsNullOrEmpty(cachedName) && cachedName != "Unknown")
@@ -2140,10 +2066,10 @@ namespace Oxide.Plugins
             }
         }
 
-        private void UpdatePlayerScore(ulong userId, string actionCode, string actionDescription, BasePlayer victim = null, HitInfo info = null, string attackerName = null, string entityName = "Unknown", bool reverseMessage = false)
+		private void UpdatePlayerScore(ulong userId, string actionCode, string actionDescription, BasePlayer victim = null, HitInfo info = null, string attackerName = null, string entityName = "Unknown", bool reverseMessage = false, float? distance = null)
 		{
 			Puts($"[Debug] UpdatePlayerScore called for UserID={userId}, ActionCode={actionCode}, Victim={victim?.displayName ?? "None"}, Entity={entityName}");
-			
+
 			if (inactiveParticipants.Contains(userId))
 			{
 				Puts($"[Debug] Skipping score update: {userId} is inactive.");
@@ -2168,7 +2094,7 @@ namespace Oxide.Plugins
 			Puts($"[Debug] {participant.Name} (UserID: {userId}) | Previous Score: {previousScore} | Gained: {points} | New Score: {participant.Score}");
 
 			SaveParticipantsData();
-			
+
 			string savedData = File.ReadAllText(ParticipantsFile);
 			Puts($"[Debug] Participants.json after save: {savedData}");
 
@@ -2182,7 +2108,7 @@ namespace Oxide.Plugins
 				"NPC" => "KillNPC",
 				"ENT" => "KillEntity",
 				"BRUH" => "DeathByBRUH",
-                "WHY"  => "KillAnimal",
+				"WHY" => "KillAnimal",
 				_ => "PlayerScoreUpdate"
 			};
 
@@ -2194,25 +2120,38 @@ namespace Oxide.Plugins
 
 			attackerName ??= GetPlayerName(userId);
 
+			foreach (var generic in new[] { "an NPC", "an entity", "an animal" })
+			{
+				if (actionDescription.Contains(generic) && entityName != "Unknown")
+				{
+					actionDescription = actionDescription.Replace(generic, $"a {entityName}");
+					break;
+				}
+			}
+
+			string articleEntityName = WithIndefiniteArticle(entityName);
+
 			var placeholders = new Dictionary<string, string>
 			{
 				{ "PlayerName", GetPlayerName(userId) },
 				{ "VictimName", victim?.displayName ?? "Unknown" },
 				{ "AttackerName", attackerName },
 				{ "EntityName", entityName },
+				{ "ArticleEntityName", WithIndefiniteArticle(entityName) },
+				{ "AttackerType", WithIndefiniteArticle(entityName) },
 				{ "Score", points.ToString() },
 				{ "TotalScore", participant.Score.ToString() },
 				{ "Action", actionDescription },
 				{ "PluralS", pluralS }
 			};
 
-            if (actionCode == "WHY")
-            {
-                placeholders["Distance"] = Configuration.AnimalKillDistance.ToString();
-            }
+			if (actionCode == "WHY")
+			{
+				placeholders["Distance"] = distance.HasValue ? distance.Value.ToString("F1") : Configuration.AnimalKillDistance.ToString();
+			}
 
 			string globalMessage = FormatMessage(template, placeholders);
-			
+
 			SendTournamentMessage(globalMessage);
 			if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
 			{
@@ -2288,11 +2227,8 @@ namespace Oxide.Plugins
 
             LogEvent($"Announced winners: {string.Join(", ", topPlayers.Select(p => p.Name))}");
         }
-
     #endregion
-
     #region Auto Enroll Handling
-
         private HashSet<ulong> autoEnrollBlacklist = new HashSet<ulong>();
         private string AutoEnrollBlacklistFile => $"{DataDirectory}/AutoEnrollBlacklist.json";
 
@@ -2324,11 +2260,8 @@ namespace Oxide.Plugins
                 PrintWarning($"Failed to save auto enroll blacklist: {ex.Message}");
             }
         }
-
     #endregion
-
     #region Notifications Handling
-
         private string Notify(string templateName, BasePlayer player, int score = 0, string action = "", string entityType = "", string victimName = "", Dictionary<string, string> placeholders = null)
         {
             if (!Configuration.MessageTemplates.TryGetValue(templateName, out var template))
@@ -2522,9 +2455,8 @@ namespace Oxide.Plugins
                 SendDiscordMessage(message);
             }
         }
-
     #endregion
-
+	#region Kit Economy Integration
     [PluginReference]
     private Plugin Kits;
 	private Plugin Clans;
@@ -2534,8 +2466,7 @@ namespace Oxide.Plugins
 		Configuration.KitPrices = new Dictionary<string, int>(
 			Configuration.KitPrices, StringComparer.OrdinalIgnoreCase);
 	}
-
-	#region Kit Economy Integration
+	
 		[HookMethod("OnKitRedeemed")]
 		private void OnKitRedeemed(BasePlayer player, string kitName)
 		{
@@ -2607,11 +2538,8 @@ namespace Oxide.Plugins
 
 			LogEvent($"{participant.Name} purchased kit '{kitName}' for {kitPrice} points. New Score: {participant.Score}");
 		}
-	
 	#endregion
-
     #region Commands
-        
         [ChatCommand("time_tournament")]
         private void TimeTournamentCommand(BasePlayer player, string command, string[] args)
         {
@@ -3158,7 +3086,6 @@ namespace Oxide.Plugins
 
             SendPlayerMessage(player, helpText.TrimEnd());
         }
-
         #endregion
     }
 }
