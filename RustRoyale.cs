@@ -1,35 +1,36 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Globalization;
+using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
 using Oxide.Core;
 using Oxide.Core.Libraries;
 using Oxide.Core.Plugins;
 using Oxide.Game.Rust.Cui;
 using UnityEngine;
-using System.Linq;
 using Newtonsoft.Json;
-using System.Collections.Concurrent;
 using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.2.3"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.2.4"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
-		private const string ConfigUiPanelName = "RustRoyale_Config_UI";
+        private const string ConfigUiPanelName = "RustRoyale_Config_UI";
         private readonly Dictionary<string, string> pendingConfig = new Dictionary<string, string>();
-		private HashSet<ulong> welcomeOptOut = new HashSet<ulong>();
-		private string WelcomeOptOutFile => $"{DataDirectory}/WelcomeOptOut.json";
-		private Dictionary<ulong, string> teamLeaderNames = new();
-		private string TeamLeadersFile => $"{DataDirectory}/TeamLeaders.json";
-		private string WithIndefiniteArticle(string word)
-			{
-				if (string.IsNullOrEmpty(word)) return "an unknown entity";
-				string lower = word.ToLowerInvariant();
-				return "aeiou".Contains(lower[0]) ? $"an {word}" : $"a {word}";
-			}
+        private HashSet<ulong> welcomeOptOut = new HashSet<ulong>();
+        private string WelcomeOptOutFile => $"{DataDirectory}/WelcomeOptOut.json";
+        private Dictionary<ulong, string> teamLeaderNames = new();
+        private string TeamLeadersFile => $"{DataDirectory}/TeamLeaders.json";
+        private string WithIndefiniteArticle(string word)
+            {
+                if (string.IsNullOrEmpty(word)) return "an unknown entity";
+                string lower = word.ToLowerInvariant();
+                return "aeiou".Contains(lower[0]) ? $"an {word}" : $"a {word}";
+            }
     
     #region Configuration
         private ConfigData Configuration;
@@ -43,16 +44,17 @@ namespace Oxide.Plugins
             public string StartDay { get; set; } = "Friday";
             public bool AutoStartEnabled { get; set; } = true;
             public bool AutoEnrollEnabled { get; set; } = true;
-			public bool PenaltyOnExitEnabled { get; set; } = true;
-			public bool ShowWelcomeUI { get; set; } = true;
-			public int PenaltyPointsOnExit { get; set; } = 25;
+            public bool PenaltyOnExitEnabled { get; set; } = true;
+            public bool ShowWelcomeUI { get; set; } = true;
+            public bool EnableAutoUpdate { get; set; } = false;
+            public int PenaltyPointsOnExit { get; set; } = 25;
             public int StartHour { get; set; } = 12;
             public int StartMinute { get; set; } = 0;
             public int DurationHours { get; set; } = 125;
             public int DataRetentionDays { get; set; } = 30;
             public int TopPlayersToTrack { get; set; } = 3;
-			public int TopClansToTrack { get; set; } = 3;
-			public int JoinCutoffHours { get; set; } = 0; // 0 = No late‑join cut‑off
+            public int TopClansToTrack { get; set; } = 3;
+            public int JoinCutoffHours { get; set; } = 0; // 0 = No late‑join cut‑off
             public List<int> NotificationIntervals { get; set; } = new List<int> { 600, 60 }; // Default: every 10 minutes (600 seconds) and last minute (60 seconds)
             public Dictionary<string, int> ScoreRules { get; set; } = new Dictionary<string, int>
             {
@@ -69,7 +71,7 @@ namespace Oxide.Plugins
             {
                 {"StartTournament", "Brace yourselves, champions! The tournament has begun! Time to show off those pro skills (or hilarious fails). Time left: {TimeRemaining}. Duration: {Duration} hours."},
                 {"EndTournament", "The tournament is over! Congrats to the winners, and for the rest... better luck next time (maybe practice a bit?)."},
-				{"ResumeTournament", "Welcome back, warriors! The tournament has been resumed. Time left: {TimeRemaining}. Duration: {Duration} hours."},
+                {"ResumeTournament", "Welcome back, warriors! The tournament has been resumed. Time left: {TimeRemaining}. Duration: {Duration} hours."},
                 {"PlayerScoreUpdate", "{PlayerName} just bagged {Score} point{PluralS} for {Action}. Somebody's on fire!"},
                 {"TopPlayers", "Leaderboard time! Top {Count} players are: {PlayerList}. Did your name make the cut, or are you just here for fun?"},
                 {"TimeRemaining", "Tick-tock! Time remaining in the tournament: {Time}. Don't waste it—score some points!"},
@@ -79,8 +81,8 @@ namespace Oxide.Plugins
                 {"KillPlayerWithEntity", "{PlayerName} earned {Score} point{PluralS} for eliminating {VictimName} with {EntityName} to respawn land! Total score: {TotalScore}. Savage!"},
                 {"SelfInflictedDeath", "Oops! {PlayerName} lost {Score} point{PluralS} for a self-inflicted oopsie. Total score: {TotalScore}. Smooth move, buddy."},
                 
-				{"KillEntity", "{PlayerName} earned {Score} point{PluralS} for obliterating {ArticleEntityName}! Total score: {TotalScore}. BOOM!" },
-				{"KillNPC", "{PlayerName} earned {Score} point{PluralS} for bravely taking down {ArticleEntityName}! Total score: {TotalScore}." },
+                {"KillEntity", "{PlayerName} earned {Score} point{PluralS} for obliterating {ArticleEntityName}! Total score: {TotalScore}. BOOM!" },
+                {"KillNPC", "{PlayerName} earned {Score} point{PluralS} for bravely taking down {ArticleEntityName}! Total score: {TotalScore}." },
                 {"KilledByPlayer", "{VictimName} lost {Score} point{PluralS} for being killed by {AttackerName}. Total score: {TotalScore}. Better luck next time!"},
                 {"DeathByBRUH", "{PlayerName} lost {Score} point{PluralS} for getting defeated by {ArticleEntityName}. Total score: {TotalScore}. BRUH moment!"},
                 {"KillAnimal", "{PlayerName} earned {Score} point{PluralS} for killing {ArticleEntityName} from over {Distance} meters away! Total score: {TotalScore}." },
@@ -94,7 +96,7 @@ namespace Oxide.Plugins
                 {"NoScores", "No scores available yet. Join the tournament and make some history!"},
                 {"TournamentAboutToStart", "The tournament is about to start! Opt-in now to participate."},
                 {"TournamentCountdown", "Tournament starting soon! {Time} left to join."},
-				{"LeaveTournamentPenalty", "{PlayerName} left the tournament and lost {PenaltyPoints} points!"}
+                {"LeaveTournamentPenalty", "{PlayerName} left the tournament and lost {PenaltyPoints} points!"}
             };
             public Dictionary<string, int> KitPrices { get; set; } = new Dictionary<string, int>
             {
@@ -132,102 +134,109 @@ namespace Oxide.Plugins
         }
 
         private void ValidateConfiguration()
-		{
-			bool updated = false;
+        {
+            bool updated = false;
 
-			void SetDefault<T>(Func<T> getter, Action<T> setter, T defaultValue, string label, Func<T, bool> isInvalid)
-			{
-				if (isInvalid(getter()))
-				{
-					PrintWarning($"Invalid {label}. Defaulting to {defaultValue}.");
-					setter(defaultValue);
-					updated = true;
-				}
-			}
+            void SetDefault<T>(Func<T> getter, Action<T> setter, T defaultValue, string label, Func<T, bool> isInvalid)
+            {
+                if (isInvalid(getter()))
+                {
+                    PrintWarning($"Invalid {label}. Defaulting to {defaultValue}.");
+                    setter(defaultValue);
+                    updated = true;
+                }
+            }
 
-			if (!Enum.TryParse(Configuration.StartDay, true, out DayOfWeek _))
-			{
-				PrintWarning("Invalid StartDay in configuration. Defaulting to Friday.");
-				Configuration.StartDay = "Friday";
-				updated = true;
-			}
+            if (!Enum.TryParse(Configuration.StartDay, true, out DayOfWeek _))
+            {
+                PrintWarning("Invalid StartDay in configuration. Defaulting to Friday.");
+                Configuration.StartDay = "Friday";
+                updated = true;
+            }
 
-			SetDefault(() => Configuration.PenaltyPointsOnExit, v => Configuration.PenaltyPointsOnExit = v, 25, "PenaltyPointsOnExit", v => v < 0);
-			SetDefault(() => Configuration.AnimalKillDistance, v => Configuration.AnimalKillDistance = v, 150f, "AnimalKillDistance", v => v <= 0);
-			SetDefault(() => Configuration.StartHour, v => Configuration.StartHour = v, 14, "StartHour", v => v < 0 || v > 23);
-			SetDefault(() => Configuration.StartMinute, v => Configuration.StartMinute = v, 0, "StartMinute", v => v < 0 || v > 59);
-			SetDefault(() => Configuration.DataRetentionDays, v => Configuration.DataRetentionDays = v, 30, "DataRetentionDays", v => v <= 0);
-			SetDefault(() => Configuration.TopPlayersToTrack, v => Configuration.TopPlayersToTrack = v, 3, "TopPlayersToTrack", v => v <= 0);
-			SetDefault(() => Configuration.TopClansToTrack, v => Configuration.TopClansToTrack = v, 3, "TopClansToTrack", v => v <= 0);
-			SetDefault(() => Configuration.JoinCutoffHours, v => Configuration.JoinCutoffHours = 6, 6, "JoinCutoffHours", v => v < 0 || v > Configuration.DurationHours);
+            SetDefault(() => Configuration.PenaltyPointsOnExit, v => Configuration.PenaltyPointsOnExit = v, 25, "PenaltyPointsOnExit", v => v < 0);
+            SetDefault(() => Configuration.AnimalKillDistance, v => Configuration.AnimalKillDistance = v, 150f, "AnimalKillDistance", v => v <= 0);
+            SetDefault(() => Configuration.StartHour, v => Configuration.StartHour = v, 14, "StartHour", v => v < 0 || v > 23);
+            SetDefault(() => Configuration.StartMinute, v => Configuration.StartMinute = v, 0, "StartMinute", v => v < 0 || v > 59);
+            SetDefault(() => Configuration.DataRetentionDays, v => Configuration.DataRetentionDays = v, 30, "DataRetentionDays", v => v <= 0);
+            SetDefault(() => Configuration.TopPlayersToTrack, v => Configuration.TopPlayersToTrack = v, 3, "TopPlayersToTrack", v => v <= 0);
+            SetDefault(() => Configuration.TopClansToTrack, v => Configuration.TopClansToTrack = v, 3, "TopClansToTrack", v => v <= 0);
+            SetDefault(() => Configuration.JoinCutoffHours, v => Configuration.JoinCutoffHours = 6, 6, "JoinCutoffHours", v => v < 0 || v > Configuration.DurationHours);
 
-			if (Configuration.DurationHours < 0.0167 || Configuration.DurationHours > 872)
-			{
-				PrintWarning($"Invalid DurationHours: {Configuration.DurationHours}. Defaulting to 72.");
-				Configuration.DurationHours = 72;
-				updated = true;
-			}
-			else if (Configuration.DurationHours < 1)
-			{
-				Puts($"[Debug] Short tournament duration detected: {Configuration.DurationHours} hours. This is valid.");
-			}
+            if (Configuration.DurationHours < 0.0167 || Configuration.DurationHours > 872)
+            {
+                PrintWarning($"Invalid DurationHours: {Configuration.DurationHours}. Defaulting to 72.");
+                Configuration.DurationHours = 72;
+                updated = true;
+            }
+            else if (Configuration.DurationHours < 1)
+            {
+                Puts($"[Debug] Short tournament duration detected: {Configuration.DurationHours} hours. This is valid.");
+            }
 
-			if (Configuration.ScoreRules == null || Configuration.ScoreRules.Count == 0)
-			{
-				PrintWarning("ScoreRules missing or empty. Using defaults.");
-				Configuration.ScoreRules = new Dictionary<string, int>
-				{
-					{"KILL", 5}, {"DEAD", -3}, {"JOKE", -1}, {"NPC", 1},
-					{"ENT", 20}, {"BRUH", -2}, {"WHY", 5}
-				};
-				updated = true;
-			}
+            if (Configuration.ScoreRules == null || Configuration.ScoreRules.Count == 0)
+            {
+                PrintWarning("ScoreRules missing or empty. Using defaults.");
+                Configuration.ScoreRules = new Dictionary<string, int>
+                {
+                    {"KILL", 5}, {"DEAD", -3}, {"JOKE", -1}, {"NPC", 1},
+                    {"ENT", 20}, {"BRUH", -2}, {"WHY", 5}
+                };
+                updated = true;
+            }
+            
+            if (!typeof(bool).IsAssignableFrom(Configuration.EnableAutoUpdate.GetType()))
+            {
+                PrintWarning("EnableAutoUpdate is invalid or missing. Defaulting to false.");
+                Configuration.EnableAutoUpdate = false;
+                updated = true;
+            }
 
-			if (Configuration.KitPrices == null || Configuration.KitPrices.Count == 0)
-			{
-				PrintWarning("KitPrices missing or empty. Using defaults.");
-				Configuration.KitPrices = new Dictionary<string, int>
-				{
-					{"Starter", 5}, {"Bronze", 25}, {"Silver", 50},
-					{"Gold", 75}, {"Platinum", 100}
-				};
-				updated = true;
-			}
+            if (Configuration.KitPrices == null || Configuration.KitPrices.Count == 0)
+            {
+                PrintWarning("KitPrices missing or empty. Using defaults.");
+                Configuration.KitPrices = new Dictionary<string, int>
+                {
+                    {"Starter", 5}, {"Bronze", 25}, {"Silver", 50},
+                    {"Gold", 75}, {"Platinum", 100}
+                };
+                updated = true;
+            }
 
-			if (Configuration.NotificationIntervals == null || !Configuration.NotificationIntervals.Any())
-			{
-				PrintWarning("NotificationIntervals is invalid or missing. Defaulting to every 10 minutes and the last minute.");
-				Configuration.NotificationIntervals = new List<int> { 600, 60 };
-				updated = true;
-			}
-			else
-			{
-				var cleaned = Configuration.NotificationIntervals.Where(x => x > 0).Distinct().ToList();
-				if (cleaned.Count != Configuration.NotificationIntervals.Count)
-				{
-					PrintWarning("NotificationIntervals contained invalid or duplicate values. Cleaning up the list.");
-					Configuration.NotificationIntervals = cleaned;
-					updated = true;
-				}
-			}
+            if (Configuration.NotificationIntervals == null || !Configuration.NotificationIntervals.Any())
+            {
+                PrintWarning("NotificationIntervals is invalid or missing. Defaulting to every 10 minutes and the last minute.");
+                Configuration.NotificationIntervals = new List<int> { 600, 60 };
+                updated = true;
+            }
+            else
+            {
+                var cleaned = Configuration.NotificationIntervals.Where(x => x > 0).Distinct().ToList();
+                if (cleaned.Count != Configuration.NotificationIntervals.Count)
+                {
+                    PrintWarning("NotificationIntervals contained invalid or duplicate values. Cleaning up the list.");
+                    Configuration.NotificationIntervals = cleaned;
+                    updated = true;
+                }
+            }
 
-			if (Configuration.ShowWelcomeUI != true && Configuration.ShowWelcomeUI != false)
-			{
-				PrintWarning("Invalid ShowWelcomeUI. Defaulting to true.");
-				Configuration.ShowWelcomeUI = true;
-				updated = true;
-			}
+            if (Configuration.ShowWelcomeUI != true && Configuration.ShowWelcomeUI != false)
+            {
+                PrintWarning("Invalid ShowWelcomeUI. Defaulting to true.");
+                Configuration.ShowWelcomeUI = true;
+                updated = true;
+            }
 
-			if (updated)
-			{
-				SaveConfig();
-				Puts("Configuration updated with validated defaults.");
-			}
+            if (updated)
+            {
+                SaveConfig();
+                Puts("Configuration updated with validated defaults.");
+            }
 
-			Puts($"Configuration validated: StartDay={Configuration.StartDay}, StartHour={Configuration.StartHour}, DurationHours={Configuration.DurationHours}, " +
-				 $"DataRetentionDays={Configuration.DataRetentionDays}, TopPlayersToTrack={Configuration.TopPlayersToTrack}, " +
-				 $"TopClansToTrack={Configuration.TopClansToTrack}, NotificationIntervals={string.Join(", ", Configuration.NotificationIntervals)}.");
-		}
+            Puts($"Configuration validated: StartDay={Configuration.StartDay}, StartHour={Configuration.StartHour}, DurationHours={Configuration.DurationHours}, " +
+                 $"DataRetentionDays={Configuration.DataRetentionDays}, TopPlayersToTrack={Configuration.TopPlayersToTrack}, " +
+                 $"TopClansToTrack={Configuration.TopClansToTrack}, NotificationIntervals={string.Join(", ", Configuration.NotificationIntervals)}.");
+        }
     #endregion
     #region Plugin Handle
         private void OnUnload()
@@ -288,501 +297,585 @@ namespace Oxide.Plugins
             return TimeZoneInfo.ConvertTimeToUtc(localTime, timezone);
         }
     #endregion
-	#region UI
-		private void AddCuiLabel(CuiElementContainer container, string parent, string anchorMin, string anchorMax, string text, int fontSize = 14, TextAnchor align = TextAnchor.MiddleLeft)
-		{
-			container.Add(new CuiLabel
-			{
-				RectTransform = { AnchorMin = anchorMin, AnchorMax = anchorMax },
-				Text = { Text = text, FontSize = fontSize, Align = align }
-			}, parent);
-		}
+    #region UI
+        private void AddCuiLabel(CuiElementContainer container, string parent, string anchorMin, string anchorMax, string text, int fontSize = 14, TextAnchor align = TextAnchor.MiddleLeft)
+        {
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = anchorMin, AnchorMax = anchorMax },
+                Text = { Text = text, FontSize = fontSize, Align = align }
+            }, parent);
+        }
 
-		private void AddCuiPanel(CuiElementContainer container, string parent, string anchorMin, string anchorMax, string color, string name = null)
-		{
-			container.Add(new CuiPanel
-			{
-				Image = { Color = color },
-				RectTransform = { AnchorMin = anchorMin, AnchorMax = anchorMax }
-			}, parent, name);
-		}
+        private void AddCuiPanel(CuiElementContainer container, string parent, string anchorMin, string anchorMax, string color, string name = null)
+        {
+            container.Add(new CuiPanel
+            {
+                Image = { Color = color },
+                RectTransform = { AnchorMin = anchorMin, AnchorMax = anchorMax }
+            }, parent, name);
+        }
 
-		private void AddCuiButton(CuiElementContainer container, string parent, string anchorMin, string anchorMax, string text, string command, string color = "0.5 0.5 0.5 1", int fontSize = 14)
-		{
-			container.Add(new CuiButton
-			{
-				Button = { Command = command, Color = color },
-				RectTransform = { AnchorMin = anchorMin, AnchorMax = anchorMax },
-				Text = { Text = text, FontSize = fontSize, Align = TextAnchor.MiddleCenter }
-			}, parent);
-		}
+        private void AddCuiButton(CuiElementContainer container, string parent, string anchorMin, string anchorMax, string text, string command, string color = "0.5 0.5 0.5 1", int fontSize = 14)
+        {
+            container.Add(new CuiButton
+            {
+                Button = { Command = command, Color = color },
+                RectTransform = { AnchorMin = anchorMin, AnchorMax = anchorMax },
+                Text = { Text = text, FontSize = fontSize, Align = TextAnchor.MiddleCenter }
+            }, parent);
+        }
 
-		private void AddCuiRawImage(CuiElementContainer container, string parent, string anchorMin, string anchorMax, string url)
-		{
-			container.Add(new CuiElement
-			{
-				Parent = parent,
-				Components =
-				{
-					new CuiRawImageComponent { Url = url },
-					new CuiRectTransformComponent { AnchorMin = anchorMin, AnchorMax = anchorMax }
-				}
-			});
-		}
-		
-		private void LoadWelcomeOptOut()
-		{
-			if (File.Exists(WelcomeOptOutFile))
-			{
-				welcomeOptOut = JsonConvert.DeserializeObject<HashSet<ulong>>(File.ReadAllText(WelcomeOptOutFile)) ?? new HashSet<ulong>();
-			}
-		}
+        private void AddCuiRawImage(CuiElementContainer container, string parent, string anchorMin, string anchorMax, string url)
+        {
+            container.Add(new CuiElement
+            {
+                Parent = parent,
+                Components =
+                {
+                    new CuiRawImageComponent { Url = url },
+                    new CuiRectTransformComponent { AnchorMin = anchorMin, AnchorMax = anchorMax }
+                }
+            });
+        }
+        
+        private void LoadWelcomeOptOut()
+        {
+            if (File.Exists(WelcomeOptOutFile))
+            {
+                welcomeOptOut = JsonConvert.DeserializeObject<HashSet<ulong>>(File.ReadAllText(WelcomeOptOutFile)) ?? new HashSet<ulong>();
+            }
+        }
 
-		private void SaveWelcomeOptOut()
-		{
-			File.WriteAllText(WelcomeOptOutFile, JsonConvert.SerializeObject(welcomeOptOut, Formatting.Indented));
-		}
-		
-		private const string WelcomeUiPanelName = "RustRoyale_Welcome_UI";
+        private void SaveWelcomeOptOut()
+        {
+            File.WriteAllText(WelcomeOptOutFile, JsonConvert.SerializeObject(welcomeOptOut, Formatting.Indented));
+        }
+        
+        private const string WelcomeUiPanelName = "RustRoyale_Welcome_UI";
 
-		private void ShowWelcomeUI(BasePlayer player)
-		{
-			CuiHelper.DestroyUi(player, WelcomeUiPanelName);
-			var container = new CuiElementContainer();
+        private void ShowWelcomeUI(BasePlayer player)
+        {
+            CuiHelper.DestroyUi(player, WelcomeUiPanelName);
+            var container = new CuiElementContainer();
 
-			container.Add(new CuiPanel
-			{
-				Image = { Color = "0 0 0 0.6" },
-				RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-				CursorEnabled = true
-			}, "Overlay", WelcomeUiPanelName);
+            container.Add(new CuiPanel
+            {
+                Image = { Color = "0 0 0 0.6" },
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                CursorEnabled = true
+            }, "Overlay", WelcomeUiPanelName);
 
-			container.Add(new CuiPanel
-			{
-				Image = { Color = "0.1 0.1 0.1 0.95" },
-				RectTransform = { AnchorMin = "0.15 0.1", AnchorMax = "0.85 0.9" }
-			}, WelcomeUiPanelName, $"{WelcomeUiPanelName}.main");
+            container.Add(new CuiPanel
+            {
+                Image = { Color = "0.1 0.1 0.1 0.95" },
+                RectTransform = { AnchorMin = "0.15 0.1", AnchorMax = "0.85 0.9" }
+            }, WelcomeUiPanelName, $"{WelcomeUiPanelName}.main");
 
-			string scrollView = $"{WelcomeUiPanelName}.scroll";
-			container.Add(new CuiElement
-			{
-				Name = scrollView,
-				Parent = $"{WelcomeUiPanelName}.main",
-				Components =
-				{
-					new CuiScrollViewComponent(),
-					new CuiRectTransformComponent { AnchorMin = "0.05 0.1", AnchorMax = "0.95 0.95" }
-				}
-			});
+            string scrollView = $"{WelcomeUiPanelName}.scroll";
+            container.Add(new CuiElement
+            {
+                Name = scrollView,
+                Parent = $"{WelcomeUiPanelName}.main",
+                Components =
+                {
+                    new CuiScrollViewComponent(),
+                    new CuiRectTransformComponent { AnchorMin = "0.05 0.1", AnchorMax = "0.95 0.95" }
+                }
+            });
 
-			float y = 0.95f;
+            float y = 0.95f;
 
-			void AddTextBlock(string text, int size = 14)
-			{
-				container.Add(new CuiLabel
-				{
-					RectTransform = { AnchorMin = $"0 {y - 0.18f}", AnchorMax = $"1 {y}" },
-					Text = { Text = text, FontSize = size, Align = TextAnchor.UpperLeft }
-				}, scrollView);
-				y -= 0.06f;
-			}
+            void AddTextBlock(string text, int size = 14)
+            {
+                container.Add(new CuiLabel
+                {
+                    RectTransform = { AnchorMin = $"0 {y - 0.18f}", AnchorMax = $"1 {y}" },
+                    Text = { Text = text, FontSize = size, Align = TextAnchor.UpperLeft }
+                }, scrollView);
+                y -= 0.06f;
+            }
 
-			AddCuiRawImage(container, scrollView, "0.4 0.91", "0.6 0.98", "https://panels.twitch.tv/panel-1025512005-image-9ae6176b-7901-47e0-a0a2-2c16fed78df3");
-			
-			y -= 0.07f;
+            AddCuiRawImage(container, scrollView, "0.4 0.91", "0.6 0.98", "https://panels.twitch.tv/panel-1025512005-image-9ae6176b-7901-47e0-a0a2-2c16fed78df3");
+            
+            y -= 0.07f;
 
-			AddTextBlock("<b>Welcome to RustRoyale!</b>", 18);
-			AddTextBlock("Get ready for an adrenaline-pumping Rust experience like no other. RustRoyale is a competitive tournament that rewards skill, strategy, and survival instincts. Earn points by taking down other players, eliminating NPC threats, and showing off your long-range hunting skills. But be warned—deaths, especially from traps or careless encounters with NPCs, will cost you. Sharpen your weapons, team up or go solo, and claim your spot at the top of the leaderboard!");
-			y -= 0.1f;
-			AddTextBlock("Join our Discord channel for updates: https://discord.gg/y2v4RaKP");
+            AddTextBlock("<b>Welcome to RustRoyale!</b>", 18);
+            AddTextBlock("Get ready for an adrenaline-pumping Rust experience like no other. RustRoyale is a competitive tournament that rewards skill, strategy, and survival instincts. Earn points by taking down other players, eliminating NPC threats, and showing off your long-range hunting skills. But be warned—deaths, especially from traps or careless encounters with NPCs, will cost you. Sharpen your weapons, team up or go solo, and claim your spot at the top of the leaderboard!");
+            y -= 0.1f;
+            AddTextBlock("Join our Discord channel for updates: https://discord.gg/y2v4RaKP");
 
-			y -= 0.1f;
+            y -= 0.05f;
 
-			float baseY = y;
-			float colRowHeight = 0.035f;
-			float colRowGap = 0.005f;
-			float colRowSize = colRowHeight + colRowGap;
-			int maxRows = Math.Max(Math.Max(3, Configuration.ScoreRules.Count), Configuration.KitPrices.Count);
+            float baseY = y;
+            float colRowHeight = 0.035f;
+            float colRowGap = 0.005f;
+            float colRowSize = colRowHeight + colRowGap;
+            int maxRows = Math.Max(Math.Max(3, Configuration.ScoreRules.Count), Configuration.KitPrices.Count);
 
-			float col1Min = 0f, col1Max = 0.32f;
-			float col2Min = 0.34f, col2Max = 0.66f;
-			float col3Min = 0.68f, col3Max = 1f;
+            float col1Min = 0f, col1Max = 0.32f;
+            float col2Min = 0.34f, col2Max = 0.66f;
+            float col3Min = 0.68f, col3Max = 1f;
 
-			AddCuiLabel(container, scrollView, $"{col1Min} {baseY}", $"{col1Max} {baseY + colRowHeight}", "<b>Tournament Stats:</b>");
+            AddCuiLabel(container, scrollView, $"{col1Min} {baseY}", $"{col1Max} {baseY + colRowHeight}", "<b>Tournament Stats:</b>");
 
-			AddCuiLabel(container, scrollView, $"{col2Min} {baseY}", $"{col2Max} {baseY + colRowHeight}", "<b>Scoring Rules:</b>");
+            AddCuiLabel(container, scrollView, $"{col2Min} {baseY}", $"{col2Max} {baseY + colRowHeight}", "<b>Scoring Rules:</b>");
 
-			AddCuiLabel(container, scrollView, $"{col3Min} {baseY}", $"{col3Max} {baseY + colRowHeight}", "<b>Kit Prices:</b>");
+            AddCuiLabel(container, scrollView, $"{col3Min} {baseY}", $"{col3Max} {baseY + colRowHeight}", "<b>Kit Prices:</b>");
 
-			y = baseY - colRowSize;
+            y = baseY - colRowSize;
 
-			for (int i = 0; i < maxRows; i++)
-			{
-				if (i == 0)
-				{
-					AddCuiLabel(container, scrollView, $"{col1Min} {y - colRowHeight}", $"{col1Max} {y}", $"• Duration: {Configuration.DurationHours} hours", 13);
+            for (int i = 0; i < maxRows; i++)
+            {
+                if (i == 0)
+                {
+                    AddCuiLabel(container, scrollView, $"{col1Min} {y - colRowHeight}", $"{col1Max} {y}", $"• Duration: {Configuration.DurationHours} hours", 13);
 
-				}
-				else if (i == 1)
-				{
-					string timeLeft = "N/A";
-					if (tournamentStartTime > DateTime.MinValue)
-					{
-						var endTime = tournamentStartTime.AddHours(Configuration.DurationHours);
-						var remaining = endTime - DateTime.UtcNow;
-						timeLeft = remaining.TotalSeconds > 0
-							? $"{(int)remaining.TotalHours}h {remaining.Minutes}m"
-							: "Tournament ended";
-					}
+                }
+                else if (i == 1)
+                {
+                    string timeLeft = "N/A";
+                    if (tournamentStartTime > DateTime.MinValue)
+                    {
+                        var endTime = tournamentStartTime.AddHours(Configuration.DurationHours);
+                        var remaining = endTime - DateTime.UtcNow;
+                        timeLeft = remaining.TotalSeconds > 0
+                            ? $"{(int)remaining.TotalHours}h {remaining.Minutes}m"
+                            : "Tournament ended";
+                    }
 
-					AddCuiLabel(container, scrollView, $"{col1Min} {y - colRowHeight}", $"{col1Max} {y}", $"• Time Left: {timeLeft}", 13);
+                    AddCuiLabel(container, scrollView, $"{col1Min} {y - colRowHeight}", $"{col1Max} {y}", $"• Time Left: {timeLeft}", 13);
 
-				}
-				else if (i == 2)
-				{
-					AddCuiLabel(container, scrollView, $"{col1Min} {y - colRowHeight}", $"{col1Max} {y}", $"• Participants: {participants.Count}", 13);
+                }
+                else if (i == 2)
+                {
+                    AddCuiLabel(container, scrollView, $"{col1Min} {y - colRowHeight}", $"{col1Max} {y}", $"• Participants: {participants.Count}", 13);
 
-				}
+                }
 
-				if (i < Configuration.ScoreRules.Count)
-				{
-					var rule = Configuration.ScoreRules.ElementAt(i);
-					string friendly = rule.Key switch
-					{
-						"KILL" => "Kill another player",
-						"DEAD" => "Killed by a player",
-						"JOKE" => "Trap/fall death",
-						"NPC" => "Kill an NPC",
-						"ENT" => "Kill Heli/Bradley",
-						"BRUH" => "Killed by Heli/NPC",
-						"WHY" => $"Animal kill >{Configuration.AnimalKillDistance}m",
-						_ => rule.Key
-					};
+                if (i < Configuration.ScoreRules.Count)
+                {
+                    var rule = Configuration.ScoreRules.ElementAt(i);
+                    string friendly = rule.Key switch
+                    {
+                        "KILL" => "Kill another player",
+                        "DEAD" => "Killed by a player",
+                        "JOKE" => "Trap/fall death",
+                        "NPC" => "Kill an NPC",
+                        "ENT" => "Kill Heli/Bradley",
+                        "BRUH" => "Killed by Heli/NPC",
+                        "WHY" => $"Animal kill >{Configuration.AnimalKillDistance}m",
+                        _ => rule.Key
+                    };
 
-					AddCuiLabel(container, scrollView, $"{col2Min} {y - colRowHeight}", $"{col2Max} {y}", $"• {friendly}: {rule.Value} pts", 13);
+                    AddCuiLabel(container, scrollView, $"{col2Min} {y - colRowHeight}", $"{col2Max} {y}", $"• {friendly}: {rule.Value} pts", 13);
 
-				}
+                }
 
-				if (i < Configuration.KitPrices.Count)
-				{
-					var kit = Configuration.KitPrices.ElementAt(i);
-					AddCuiLabel(container, scrollView, $"{col3Min} {y - colRowHeight}", $"{col3Max} {y}", $"• {kit.Key} Kit: {kit.Value} pts", 13);
+                if (i < Configuration.KitPrices.Count)
+                {
+                    var kit = Configuration.KitPrices.ElementAt(i);
+                    AddCuiLabel(container, scrollView, $"{col3Min} {y - colRowHeight}", $"{col3Max} {y}", $"• {kit.Key} Kit: {kit.Value} pts", 13);
 
-				}
+                }
 
-				y -= colRowSize;
-			}
+                y -= colRowSize;
+            }
 
-			string toggleLabel = welcomeOptOut.Contains(player.userID) ? "Show next time" : "Don’t show again";
-			string toggleCommand = $"welcomeui_toggle {player.userID}";
-			container.Add(new CuiButton
-			{
-				Button = { Command = toggleCommand, Color = "0.2 0.5 0.8 1" },
-				RectTransform = { AnchorMin = "0.35 0.01", AnchorMax = "0.49 0.06" },
-				Text = { Text = toggleLabel, FontSize = 12, Align = TextAnchor.MiddleCenter }
-			}, $"{WelcomeUiPanelName}.main");
+            string toggleLabel = welcomeOptOut.Contains(player.userID) ? "Show next time" : "Don’t show again";
+            string toggleCommand = $"welcomeui_toggle {player.userID}";
+            container.Add(new CuiButton
+            {
+                Button = { Command = toggleCommand, Color = "0.2 0.5 0.8 1" },
+                RectTransform = { AnchorMin = "0.35 0.01", AnchorMax = "0.49 0.06" },
+                Text = { Text = toggleLabel, FontSize = 12, Align = TextAnchor.MiddleCenter }
+            }, $"{WelcomeUiPanelName}.main");
 
-			AddCuiButton(container, $"{WelcomeUiPanelName}.main", "0.51 0.01", "0.65 0.06", "Close", "welcomeui_close", "0.7 0.2 0.2 1");
-			
-			y -= 0.07f;
+            AddCuiButton(container, $"{WelcomeUiPanelName}.main", "0.51 0.01", "0.65 0.06", "Close", "welcomeui_close", "0.7 0.2 0.2 1");
+            
+            y -= 0.07f;
 
-			AddTextBlock("You can use commands such as /help_tournament to learn more.");
-			
+            AddTextBlock("You can use commands such as /help_tournament to learn more.");
+            
+			var pluginTitles = Interface.Oxide.RootPluginManager
+				.GetPlugins()
+				.Select(p => p.Title)
+				.Where(t => !string.IsNullOrEmpty(t))
+				.Distinct();
+			var pluginList = string.Join(", ", pluginTitles);
+
+			AddTextBlock($"Available plugins: {pluginList}");
 
 			CuiHelper.AddUi(player, container);
-		}
-		
-		[ConsoleCommand("welcomeui_close")]
-		private void CloseWelcomeUI(ConsoleSystem.Arg arg)
-		{
-			var player = arg.Player();
-			if (player != null)
-			{
-				CuiHelper.DestroyUi(player, WelcomeUiPanelName);
-			}
-		}
 
-		[ConsoleCommand("welcomeui_toggle")]
-		private void ToggleWelcomeUI(ConsoleSystem.Arg arg)
-		{
-			var player = arg.Player();
-			if (player == null || arg.Args.Length < 1) return;
+        }
+        
+        [ConsoleCommand("welcomeui_close")]
+        private void CloseWelcomeUI(ConsoleSystem.Arg arg)
+        {
+            var player = arg.Player();
+            if (player != null)
+            {
+                CuiHelper.DestroyUi(player, WelcomeUiPanelName);
+            }
+        }
 
-			ulong id = player.userID;
-			if (welcomeOptOut.Contains(id))
-			{
-				welcomeOptOut.Remove(id);
-			}
-			else
-			{
-				welcomeOptOut.Add(id);
-			}
+        [ConsoleCommand("welcomeui_toggle")]
+        private void ToggleWelcomeUI(ConsoleSystem.Arg arg)
+        {
+            var player = arg.Player();
+            if (player == null || arg.Args.Length < 1) return;
 
-			SaveWelcomeOptOut();
-			ShowWelcomeUI(player);
-		}
-		
-		private void AddCuiInput(CuiElementContainer container, string parent, string label, string key, string value, float xLabel, float xInput, float y)
-			{
-				AddCuiLabel(container, parent, $"{xLabel} {y}", $"{xLabel + 0.2f} {y + 0.035f}", label);
+            ulong id = player.userID;
+            if (welcomeOptOut.Contains(id))
+            {
+                welcomeOptOut.Remove(id);
+            }
+            else
+            {
+                welcomeOptOut.Add(id);
+            }
 
-				AddCuiPanel(container, parent, $"{xInput} {y}", $"{xInput + 0.2f} {y + 0.035f}", "0.8 0.8 0.8 0.3");
+            SaveWelcomeOptOut();
+            ShowWelcomeUI(player);
+        }
+        
+        private void AddCuiInput(CuiElementContainer container, string parent, string label, string key, string value, float xLabel, float xInput, float y)
+            {
+                AddCuiLabel(container, parent, $"{xLabel} {y}", $"{xLabel + 0.2f} {y + 0.035f}", label);
 
-				container.Add(new CuiElement
-				{
-					Name = $"{key}Input",
-					Parent = parent,
-					Components =
-					{
-						new CuiRectTransformComponent { AnchorMin = $"{xInput} {y}", AnchorMax = $"{xInput + 0.2f} {y + 0.035f}" },
-						new CuiInputFieldComponent
-						{
-							Text = value,
-							Align = TextAnchor.MiddleLeft,
-							Command = $"config_set {key}"
-						}
-					}
-				});
-			}
-		
-		private void ShowConfigUI(BasePlayer player)
-		{
-			CuiHelper.DestroyUi(player, ConfigUiPanelName);
-			var container = new CuiElementContainer();
+                AddCuiPanel(container, parent, $"{xInput} {y}", $"{xInput + 0.2f} {y + 0.035f}", "0.8 0.8 0.8 0.3");
 
-			container.Add(new CuiPanel
-			{
-				Image = { Color = "0 0 0 0.8" },
-				RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-				CursorEnabled = true
-			}, "Overlay", ConfigUiPanelName);
+                container.Add(new CuiElement
+                {
+                    Name = $"{key}Input",
+                    Parent = parent,
+                    Components =
+                    {
+                        new CuiRectTransformComponent { AnchorMin = $"{xInput} {y}", AnchorMax = $"{xInput + 0.2f} {y + 0.035f}" },
+                        new CuiInputFieldComponent
+                        {
+                            Text = value,
+                            Align = TextAnchor.MiddleLeft,
+                            Command = $"config_set {key}"
+                        }
+                    }
+                });
+            }
+        
+        private void ShowConfigUI(BasePlayer player)
+        {
+            CuiHelper.DestroyUi(player, ConfigUiPanelName);
+            var container = new CuiElementContainer();
 
-			container.Add(new CuiPanel
-			{
-				Image = { Color = "0.1 0.1 0.1 0.95" },
-				RectTransform = { AnchorMin = "0.2 0.1", AnchorMax = "0.8 0.9" }
-			}, ConfigUiPanelName, $"{ConfigUiPanelName}.main");
+            container.Add(new CuiPanel
+            {
+                Image = { Color = "0 0 0 0.8" },
+                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                CursorEnabled = true
+            }, "Overlay", ConfigUiPanelName);
 
-			container.Add(new CuiPanel
-			{
-				Image = { Color = "0.25 0.35 0.45 1" },
-				RectTransform = { AnchorMin = "0 0.93", AnchorMax = "1 1" }
-			}, $"{ConfigUiPanelName}.main", $"{ConfigUiPanelName}.header");
+            container.Add(new CuiPanel
+            {
+                Image = { Color = "0.1 0.1 0.1 0.95" },
+                RectTransform = { AnchorMin = "0.2 0.1", AnchorMax = "0.8 0.9" }
+            }, ConfigUiPanelName, $"{ConfigUiPanelName}.main");
 
-			AddCuiLabel(container, $"{ConfigUiPanelName}.header", "0.02 0", "0.9 1", "⚙ RustRoyale Configuration", 18);
+            container.Add(new CuiPanel
+            {
+                Image = { Color = "0.25 0.35 0.45 1" },
+                RectTransform = { AnchorMin = "0 0.93", AnchorMax = "1 1" }
+            }, $"{ConfigUiPanelName}.main", $"{ConfigUiPanelName}.header");
 
-			container.Add(new CuiButton
-			{
-				Button = { Color = "0.8 0.2 0.2 1", Command = "config_cancel" },
-				RectTransform = { AnchorMin = "0.93 0.1", AnchorMax = "0.98 0.9" },
-				Text = { Text = "<b>X</b>", FontSize = 16, Align = TextAnchor.MiddleCenter }
-			}, $"{ConfigUiPanelName}.header");
+            AddCuiLabel(container, $"{ConfigUiPanelName}.header", "0.02 0", "0.9 1", "⚙ RustRoyale Configuration", 18);
 
-			float y = 0.87f;
-			float xLeftLabel = 0.05f, xLeftInput = 0.25f;
-			float xRightLabel = 0.55f, xRightInput = 0.75f;
+            container.Add(new CuiButton
+            {
+                Button = { Color = "0.8 0.2 0.2 1", Command = "config_cancel" },
+                RectTransform = { AnchorMin = "0.93 0.1", AnchorMax = "0.98 0.9" },
+                Text = { Text = "<b>X</b>", FontSize = 16, Align = TextAnchor.MiddleCenter }
+            }, $"{ConfigUiPanelName}.header");
 
-			void AddToggle(string label, string key, bool value)
-			{
-				float xLabel = xLeftLabel;
-				float xButton = xLeftInput + 0.02f;
+            float y = 0.81f;
+            float xLeftLabel = 0.05f, xLeftInput = 0.25f;
+            float xRightLabel = 0.55f, xRightInput = 0.75f;
 
-				container.Add(new CuiLabel
-				{
-					RectTransform = { AnchorMin = $"{xLabel} {y}", AnchorMax = $"{xLabel + 0.2f} {y + 0.035f}" },
-					Text = { Text = label, FontSize = 14, Align = TextAnchor.MiddleLeft }
-				}, $"{ConfigUiPanelName}.main");
+            void AddToggle(string label, string key, bool value)
+            {
+                float xLabel = xLeftLabel;
+                float xButton = xLeftInput + 0.02f;
 
-				container.Add(new CuiPanel
-				{
-					Image = { Color = "0.8 0.8 0.8 0.3" },
-					RectTransform = { AnchorMin = $"{xButton} {y}", AnchorMax = $"{xButton + 0.2f} {y + 0.035f}" }
-				}, $"{ConfigUiPanelName}.main");
+                container.Add(new CuiLabel
+                {
+                    RectTransform = { AnchorMin = $"{xLabel} {y}", AnchorMax = $"{xLabel + 0.2f} {y + 0.035f}" },
+                    Text = { Text = label, FontSize = 14, Align = TextAnchor.MiddleLeft }
+                }, $"{ConfigUiPanelName}.main");
 
-				container.Add(new CuiButton
-				{
-					Button = { Command = $"config_set {key} {!value}", Color = value ? "0.3 0.6 0.3 1" : "0.6 0.3 0.3 1" },
-					RectTransform = { AnchorMin = $"{xButton} {y}", AnchorMax = $"{xButton + 0.2f} {y + 0.035f}" },
-					Text = { Text = value.ToString(), FontSize = 14, Align = TextAnchor.MiddleCenter }
-				}, $"{ConfigUiPanelName}.main");
+                container.Add(new CuiPanel
+                {
+                    Image = { Color = "0.8 0.8 0.8 0.3" },
+                    RectTransform = { AnchorMin = $"{xButton} {y}", AnchorMax = $"{xButton + 0.2f} {y + 0.035f}" }
+                }, $"{ConfigUiPanelName}.main");
 
-				y -= 0.05f;
-			}
+                container.Add(new CuiButton
+                {
+                    Button = { Command = $"config_set {key} {!value}", Color = value ? "0.3 0.6 0.3 1" : "0.6 0.3 0.3 1" },
+                    RectTransform = { AnchorMin = $"{xButton} {y}", AnchorMax = $"{xButton + 0.2f} {y + 0.035f}" },
+                    Text = { Text = value.ToString(), FontSize = 14, Align = TextAnchor.MiddleCenter }
+                }, $"{ConfigUiPanelName}.main");
 
-			AddCuiInput(container, $"{ConfigUiPanelName}.main", "Timezone", "Timezone", Configuration.Timezone, xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
-			AddCuiInput(container, $"{ConfigUiPanelName}.main", "StartDay", "StartDay", Configuration.StartDay, xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
-			AddCuiInput(container, $"{ConfigUiPanelName}.main", "StartHour", "StartHour", Configuration.StartHour.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
-			AddCuiInput(container, $"{ConfigUiPanelName}.main", "StartMinute", "StartMinute", Configuration.StartMinute.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
-			AddCuiInput(container, $"{ConfigUiPanelName}.main", "DurationHours", "DurationHours", Configuration.DurationHours.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
-			AddCuiInput(container, $"{ConfigUiPanelName}.main", "TopPlayersToTrack", "TopPlayersToTrack", Configuration.TopPlayersToTrack.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
-			AddCuiInput(container, $"{ConfigUiPanelName}.main", "JoinCutoffHours", "JoinCutoffHours", Configuration.JoinCutoffHours.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
-			AddCuiInput(container, $"{ConfigUiPanelName}.main", "AnimalKillDistance", "AnimalKillDistance", Configuration.AnimalKillDistance.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
-			AddCuiInput(container, $"{ConfigUiPanelName}.main", "PenaltyPointsOnExit", "PenaltyPointsOnExit", Configuration.PenaltyPointsOnExit.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+                y -= 0.05f;
+            }
 
-			AddToggle("Show Welcome Message", "ShowWelcomeUI", Configuration.ShowWelcomeUI);
-			AddToggle("AutoStartEnabled", "AutoStartEnabled", Configuration.AutoStartEnabled);
-			AddToggle("AutoEnrollEnabled", "AutoEnrollEnabled", Configuration.AutoEnrollEnabled);
-			AddToggle("PenaltyOnExitEnabled", "PenaltyOnExitEnabled", Configuration.PenaltyOnExitEnabled);
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "Timezone", "Timezone", Configuration.Timezone, xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "StartDay", "StartDay", Configuration.StartDay, xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "StartHour", "StartHour", Configuration.StartHour.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "StartMinute", "StartMinute", Configuration.StartMinute.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "DurationHours", "DurationHours", Configuration.DurationHours.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "TopPlayersToTrack", "TopPlayersToTrack", Configuration.TopPlayersToTrack.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "JoinCutoffHours", "JoinCutoffHours", Configuration.JoinCutoffHours.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "AnimalKillDistance", "AnimalKillDistance", Configuration.AnimalKillDistance.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "PenaltyPointsOnExit", "PenaltyPointsOnExit", Configuration.PenaltyPointsOnExit.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
 
-			float groupY = 0.87f;
+            AddToggle("EnableAutoUpdate", "Enable Auto-Update from GitHub", Configuration.EnableAutoUpdate);
+            AddToggle("Show Welcome Message", "ShowWelcomeUI", Configuration.ShowWelcomeUI);
+            AddToggle("AutoStartEnabled", "AutoStartEnabled", Configuration.AutoStartEnabled);
+            AddToggle("AutoEnrollEnabled", "AutoEnrollEnabled", Configuration.AutoEnrollEnabled);
+            AddToggle("PenaltyOnExitEnabled", "PenaltyOnExitEnabled", Configuration.PenaltyOnExitEnabled);
 
-			foreach (var kv in Configuration.ScoreRules)
-			{
-				float marginX = xRightInput + 0.03f;
+            float groupY = 0.81f;
 
-				container.Add(new CuiLabel
-				{
-					RectTransform = { AnchorMin = $"{xRightLabel} {groupY}", AnchorMax = $"{xRightLabel + 0.2f} {groupY + 0.035f}" },
-					Text = { Text = $"ScoreRules[{kv.Key}]", FontSize = 14, Align = TextAnchor.MiddleLeft }
-				}, $"{ConfigUiPanelName}.main");
+            foreach (var kv in Configuration.ScoreRules)
+            {
+                float marginX = xRightInput + 0.03f;
 
-				container.Add(new CuiPanel
-				{
-					Image = { Color = "0.8 0.8 0.8 0.3" },
-					RectTransform = { AnchorMin = $"{marginX} {groupY}", AnchorMax = $"{marginX + 0.15f} {groupY + 0.035f}" }
-				}, $"{ConfigUiPanelName}.main");
+                container.Add(new CuiLabel
+                {
+                    RectTransform = { AnchorMin = $"{xRightLabel} {groupY}", AnchorMax = $"{xRightLabel + 0.2f} {groupY + 0.035f}" },
+                    Text = { Text = $"ScoreRules[{kv.Key}]", FontSize = 14, Align = TextAnchor.MiddleLeft }
+                }, $"{ConfigUiPanelName}.main");
 
-				container.Add(new CuiElement
-				{
-					Name = $"ScoreRule_{kv.Key}",
-					Parent = $"{ConfigUiPanelName}.main",
-					Components = {
-						new CuiRectTransformComponent { AnchorMin = $"{marginX} {groupY}", AnchorMax = $"{marginX + 0.15f} {groupY + 0.035f}" },
-						new CuiInputFieldComponent {
-							Text = kv.Value.ToString(),
-							Align = TextAnchor.MiddleLeft,
-							Command = $"config_set ScoreRules.{kv.Key}"
-						}
-					}
-				});
+                container.Add(new CuiPanel
+                {
+                    Image = { Color = "0.8 0.8 0.8 0.3" },
+                    RectTransform = { AnchorMin = $"{marginX} {groupY}", AnchorMax = $"{marginX + 0.15f} {groupY + 0.035f}" }
+                }, $"{ConfigUiPanelName}.main");
 
-				groupY -= 0.05f;
-			}
+                container.Add(new CuiElement
+                {
+                    Name = $"ScoreRule_{kv.Key}",
+                    Parent = $"{ConfigUiPanelName}.main",
+                    Components = {
+                        new CuiRectTransformComponent { AnchorMin = $"{marginX} {groupY}", AnchorMax = $"{marginX + 0.15f} {groupY + 0.035f}" },
+                        new CuiInputFieldComponent {
+                            Text = kv.Value.ToString(),
+                            Align = TextAnchor.MiddleLeft,
+                            Command = $"config_set ScoreRules.{kv.Key}"
+                        }
+                    }
+                });
 
-			groupY -= 0.01f;
+                groupY -= 0.05f;
+            }
 
-			foreach (var kv in Configuration.KitPrices)
-			{
-				float marginX = xRightInput + 0.03f;
+            groupY -= 0.01f;
 
-				container.Add(new CuiLabel
-				{
-					RectTransform = { AnchorMin = $"{xRightLabel} {groupY}", AnchorMax = $"{xRightLabel + 0.2f} {groupY + 0.035f}" },
-					Text = { Text = $"KitPrices[{kv.Key}]", FontSize = 14, Align = TextAnchor.MiddleLeft }
-				}, $"{ConfigUiPanelName}.main");
+            foreach (var kv in Configuration.KitPrices)
+            {
+                float marginX = xRightInput + 0.03f;
 
-				container.Add(new CuiPanel
-				{
-					Image = { Color = "0.8 0.8 0.8 0.3" },
-					RectTransform = { AnchorMin = $"{marginX} {groupY}", AnchorMax = $"{marginX + 0.15f} {groupY + 0.035f}" }
-				}, $"{ConfigUiPanelName}.main");
+                container.Add(new CuiLabel
+                {
+                    RectTransform = { AnchorMin = $"{xRightLabel} {groupY}", AnchorMax = $"{xRightLabel + 0.2f} {groupY + 0.035f}" },
+                    Text = { Text = $"KitPrices[{kv.Key}]", FontSize = 14, Align = TextAnchor.MiddleLeft }
+                }, $"{ConfigUiPanelName}.main");
 
-				container.Add(new CuiElement
-				{
-					Name = $"KitPrice_{kv.Key}",
-					Parent = $"{ConfigUiPanelName}.main",
-					Components = {
-						new CuiRectTransformComponent { AnchorMin = $"{marginX} {groupY}", AnchorMax = $"{marginX + 0.15f} {groupY + 0.035f}" },
-						new CuiInputFieldComponent {
-							Text = kv.Value.ToString(),
-							Align = TextAnchor.MiddleLeft,
-							Command = $"config_set KitPrices.{kv.Key}"
-						}
-					}
-				});
+                container.Add(new CuiPanel
+                {
+                    Image = { Color = "0.8 0.8 0.8 0.3" },
+                    RectTransform = { AnchorMin = $"{marginX} {groupY}", AnchorMax = $"{marginX + 0.15f} {groupY + 0.035f}" }
+                }, $"{ConfigUiPanelName}.main");
 
-				groupY -= 0.05f;
-			}
+                container.Add(new CuiElement
+                {
+                    Name = $"KitPrice_{kv.Key}",
+                    Parent = $"{ConfigUiPanelName}.main",
+                    Components = {
+                        new CuiRectTransformComponent { AnchorMin = $"{marginX} {groupY}", AnchorMax = $"{marginX + 0.15f} {groupY + 0.035f}" },
+                        new CuiInputFieldComponent {
+                            Text = kv.Value.ToString(),
+                            Align = TextAnchor.MiddleLeft,
+                            Command = $"config_set KitPrices.{kv.Key}"
+                        }
+                    }
+                });
 
-			container.Add(new CuiButton
-			{
-				Button = { Command = "config_save", Color = "0.2 0.6 0.2 1" },
-				RectTransform = { AnchorMin = "0.27 0.02", AnchorMax = "0.47 0.07" },
-				Text = { Text = "Save & Reload", FontSize = 14, Align = TextAnchor.MiddleCenter }
-			}, $"{ConfigUiPanelName}.main");
+                groupY -= 0.05f;
+            }
 
-			container.Add(new CuiButton
-			{
-				Button = { Command = "config_cancel", Color = "0.6 0.2 0.2 1" },
-				RectTransform = { AnchorMin = "0.53 0.02", AnchorMax = "0.73 0.07" },
-				Text = { Text = "Cancel", FontSize = 14, Align = TextAnchor.MiddleCenter }
-			}, $"{ConfigUiPanelName}.main");
+            container.Add(new CuiButton
+            {
+                Button = { Command = "config_save", Color = "0.2 0.6 0.2 1" },
+                RectTransform = { AnchorMin = "0.27 0.02", AnchorMax = "0.47 0.07" },
+                Text = { Text = "Save & Reload", FontSize = 14, Align = TextAnchor.MiddleCenter }
+            }, $"{ConfigUiPanelName}.main");
 
-			CuiHelper.AddUi(player, container);
-		}
-		
-		private void CloseConfigUI(BasePlayer player)
-		{
-			CuiHelper.DestroyUi(player, ConfigUiPanelName);
-		}
-		
-		[ConsoleCommand("config_set")]
-		private void ConsoleConfigSet(ConsoleSystem.Arg arg)
-		{
-			var player = arg.Player();
-			if (player == null || !HasAdminPermission(player)) return;
-			var args = arg.Args;
-			if (args.Length < 2) return;
+            container.Add(new CuiButton
+            {
+                Button = { Command = "config_cancel", Color = "0.6 0.2 0.2 1" },
+                RectTransform = { AnchorMin = "0.53 0.02", AnchorMax = "0.73 0.07" },
+                Text = { Text = "Cancel", FontSize = 14, Align = TextAnchor.MiddleCenter }
+            }, $"{ConfigUiPanelName}.main");
+            
+            string currentVersion = GetCurrentPluginVersion();
+            string versionStatus = "Up to date";
+            string versionColor = "#00ff00";
 
-			string key = args[0];
-			string val = string.Join(" ", args.Skip(1));
-			pendingConfig[key] = val;
-			player.ChatMessage($"<color=#ffd479>RustRoyale:</color> Set {key} → {val}");
-		}
-		
-		[ConsoleCommand("config_save")]
-		private void ConfigSave(ConsoleSystem.Arg arg)
-		{
-			var player = arg.Player();
-			if (player == null || !HasAdminPermission(player)) return;
+            if (!string.IsNullOrEmpty(LatestPluginVersion))
+            {
+                var current = ParseVersion(currentVersion);
+                var latest = ParseVersion(LatestPluginVersion);
 
-			foreach (var kv in pendingConfig)
-			{
-				var prop = typeof(ConfigData).GetProperty(kv.Key);
-				if (prop == null) { player.ChatMessage($"Unknown property: {kv.Key}"); continue; }
+                if (latest > current)
+                {
+                    versionStatus = $"Update available ({LatestPluginVersion})";
+                    versionColor = "#ff0000";
+                }
+            }
 
-				try
-				{
-					object converted = Convert.ChangeType(kv.Value, prop.PropertyType);
-					prop.SetValue(Configuration, converted);
-				}
-				catch
-				{
-					player.ChatMessage($"Failed to parse {kv.Key} as {prop.PropertyType.Name}");
-				}
-			}
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = "0.20 0.84", AnchorMax = "0.80 0.96" },
+                Text = {
+                    Text = $"<color={versionColor}>RustRoyale v{currentVersion} - {versionStatus}</color>",
+                    FontSize = 14,
+                    Align = TextAnchor.MiddleCenter
+                }
+            }, $"{ConfigUiPanelName}.main");
 
-			pendingConfig.Clear();
-			SaveConfig();
-			ApplyConfiguration();
+            CuiHelper.AddUi(player, container);
+        }
+        
+        private void CloseConfigUI(BasePlayer player)
+        {
+            CuiHelper.DestroyUi(player, ConfigUiPanelName);
+        }
+        
+        [ConsoleCommand("config_set")]
+        private void ConsoleConfigSet(ConsoleSystem.Arg arg)
+        {
+            var player = arg.Player();
+            if (player == null || !HasAdminPermission(player)) return;
+            var args = arg.Args;
+            if (args.Length < 2) return;
 
-			CloseConfigUI(player);
-		}
-		
-		[ConsoleCommand("config_cancel")]
-		private void ConfigCancel(ConsoleSystem.Arg arg)
-		{
-			var player = arg.Player();
-			if (player == null || !HasAdminPermission(player)) return;
-			pendingConfig.Clear();
-			CloseConfigUI(player);
-		}
-	#endregion
+            string key = args[0];
+            string val = string.Join(" ", args.Skip(1));
+            pendingConfig[key] = val;
+            player.ChatMessage($"<color=#ffd479>RustRoyale:</color> Set {key} → {val}");
+        }
+        
+        [ConsoleCommand("config_save")]
+        private void ConfigSave(ConsoleSystem.Arg arg)
+        {
+            var player = arg.Player();
+            if (player == null || !HasAdminPermission(player)) return;
+
+            foreach (var kv in pendingConfig)
+            {
+                try
+                {
+                    if (kv.Key.StartsWith("ScoreRules."))
+                    {
+                        string ruleKey = kv.Key.Substring("ScoreRules.".Length);
+                        if (Configuration.ScoreRules.ContainsKey(ruleKey) && int.TryParse(kv.Value, out int score))
+                        {
+                            Configuration.ScoreRules[ruleKey] = score;
+                            player.ChatMessage($"Updated ScoreRules[{ruleKey}] = {score}");
+                        }
+                        else
+                        {
+                            player.ChatMessage($"Failed to update ScoreRules[{ruleKey}]");
+                        }
+                        continue;
+                    }
+
+                    if (kv.Key.StartsWith("KitPrices."))
+                    {
+                        string kitKey = kv.Key.Substring("KitPrices.".Length);
+                        if (Configuration.KitPrices.ContainsKey(kitKey) && int.TryParse(kv.Value, out int price))
+                        {
+                            Configuration.KitPrices[kitKey] = price;
+                            player.ChatMessage($"Updated KitPrices[{kitKey}] = {price}");
+                        }
+                        else
+                        {
+                            player.ChatMessage($"Failed to update KitPrices[{kitKey}]");
+                        }
+                        continue;
+                    }
+
+                    var prop = typeof(ConfigData).GetProperty(kv.Key);
+                    if (prop == null)
+                    {
+                        player.ChatMessage($"Unknown property: {kv.Key}");
+                        continue;
+                    }
+
+                    object converted;
+                    if (prop.PropertyType == typeof(bool))
+                    {
+                        converted = kv.Value.Equals("true", StringComparison.OrdinalIgnoreCase);
+                    }
+                    else if (prop.PropertyType.IsEnum)
+                    {
+                        converted = Enum.Parse(prop.PropertyType, kv.Value, true);
+                    }
+                    else
+                    {
+                        converted = Convert.ChangeType(kv.Value, prop.PropertyType);
+                    }
+
+                    prop.SetValue(Configuration, converted);
+                    player.ChatMessage($"Updated {kv.Key} = {converted}");
+                }
+                catch (Exception ex)
+                {
+                    player.ChatMessage($"Failed to parse {kv.Key}: {ex.Message}");
+                }
+            }
+
+            pendingConfig.Clear();
+            SaveConfig();
+            ApplyConfiguration();
+
+            CloseConfigUI(player);
+        }
+        
+        [ConsoleCommand("config_cancel")]
+        private void ConfigCancel(ConsoleSystem.Arg arg)
+        {
+            var player = arg.Player();
+            if (player == null || !HasAdminPermission(player)) return;
+            pendingConfig.Clear();
+            CloseConfigUI(player);
+        }
+    #endregion
     #region Permissions
         private const string AdminPermission = "rustroyale.admin";
 
         private void Init()
         {
             permission.RegisterPermission(AdminPermission, this);
-			LoadWelcomeOptOut();
+            LoadWelcomeOptOut();
             ValidateConfiguration();
-			NormaliseKitPrices();
+            NormaliseKitPrices();
             LoadAutoEnrollBlacklist();
             LoadParticipantsData();
-			LoadTeamLeaderNames();
-			ResumeInterruptedTournament();
-			if (!isTournamentRunning)
-				ScheduleTournament();
+            LoadTeamLeaderNames();
+            ResumeInterruptedTournament();
+            if (!isTournamentRunning)
+                ScheduleTournament();
 
             Puts($"Initialization complete. Tournament duration set to {Configuration.DurationHours} hours.");
         }
@@ -825,22 +918,22 @@ namespace Oxide.Plugins
         }
 
         private void LogEvent(string message)
-		{
-			try
-			{
-				if (string.IsNullOrEmpty(currentTournamentFile))
-				{
-					PrintWarning("Tournament file has not been initialized. Calling StartTournamentFile()...");
-					StartTournamentFile();
-				}
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(currentTournamentFile))
+                {
+                    PrintWarning("Tournament file has not been initialized. Calling StartTournamentFile()...");
+                    StartTournamentFile();
+                }
 
-				File.AppendAllText(currentTournamentFile, $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff} - {message}\n");
-			}
-			catch (Exception ex)
-			{
-				PrintError($"Unexpected error while logging event: {ex.Message}\n{ex.StackTrace}");
-			}
-		}
+                File.AppendAllText(currentTournamentFile, $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff} - {message}\n");
+            }
+            catch (Exception ex)
+            {
+                PrintError($"Unexpected error while logging event: {ex.Message}\n{ex.StackTrace}");
+            }
+        }
 
         private void ManageOldTournamentFiles()
         {
@@ -886,34 +979,118 @@ namespace Oxide.Plugins
             LogEvent(participantsLog);
         }
     #endregion
-	#region On Start
-		private void OnServerInitialized()
-		{
-			foreach (var player in BasePlayer.activePlayerList)
-			{
-				OnPlayerInit(player);
-			}
-		}
-	#endregion
+    #region On Start
+        private const string PluginUpdateUrl = "https://raw.githubusercontent.com/potaetobag/RustRoyale/main/RustRoyale.cs";
+        private string LatestPluginVersion = null;
+
+        private string GetCurrentPluginVersion()
+        {
+            var attr = (InfoAttribute)Attribute.GetCustomAttribute(typeof(RustRoyale), typeof(InfoAttribute));
+            return attr != null ? attr.Version.ToString() : "unknown";
+        }
+        
+        private VersionNumber ParseVersion(string version)
+        {
+            var parts = version.Split('.');
+            if (parts.Length != 3) return new VersionNumber(0, 0, 0);
+
+            return new VersionNumber(
+                int.TryParse(parts[0], out var major) ? major : 0,
+                int.TryParse(parts[1], out var minor) ? minor : 0,
+                int.TryParse(parts[2], out var patch) ? patch : 0
+            );
+        }
+
+        private string ExtractVersionFromSource(string source)
+        {
+            var match = Regex.Match(source, @"\[Info\(\s*""[^""]+"",\s*""[^""]+"",\s*""([^""]+)""\)");
+            return match.Success ? match.Groups[1].Value : null;
+        }
+
+        private void OnServerInitialized()
+        {
+            Puts("[RustRoyale] Checking current version...");
+            string currentVersion = GetCurrentPluginVersion();
+            Puts($"[RustRoyale] Current plugin version: {currentVersion}");
+
+            Puts("[RustRoyale] Checking remote plugin for updates...");
+
+            webrequest.Enqueue(PluginUpdateUrl, null, (code, response) =>
+            {
+                if (code != 200 || string.IsNullOrEmpty(response))
+                {
+                    PrintWarning($"[RustRoyale] Failed to fetch plugin source from GitHub. Code: {code}");
+                    return;
+                }
+
+                string latestVersion = ExtractVersionFromSource(response);
+                if (string.IsNullOrEmpty(latestVersion))
+                {
+                    PrintWarning("[RustRoyale] Could not extract version from GitHub source.");
+                    return;
+                }
+
+                LatestPluginVersion = latestVersion;
+
+                VersionNumber current = ParseVersion(currentVersion);
+                VersionNumber latest = ParseVersion(latestVersion);
+
+                Puts($"[RustRoyale] Latest available version: {latest}");
+
+                if (latest <= current)
+                {
+                    Puts("[RustRoyale] Plugin is up to date.");
+                    return;
+                }
+
+                PrintWarning($"[RustRoyale] A newer version is available: {latest}");
+
+                if (!Configuration.EnableAutoUpdate)
+                {
+                    PrintWarning("[RustRoyale] Auto-update is disabled. Skipping update.");
+                    return;
+                }
+
+                Puts("[RustRoyale] Auto-update enabled. Downloading and updating plugin...");
+
+                try
+                {
+                    string path = Interface.Oxide.PluginDirectory + Name + ".cs";
+                    File.WriteAllText(path, response);
+                    PrintWarning("[RustRoyale] Plugin file updated from GitHub. Reloading...");
+                    timer.Once(2f, () => Server.Command($"oxide.reload {Name}"));
+                }
+                catch (Exception ex)
+                {
+                    PrintError($"[RustRoyale] Failed to write plugin file: {ex.Message}");
+                }
+            }, this);
+
+            foreach (var player in BasePlayer.activePlayerList)
+            {
+                OnPlayerInit(player);
+            }
+        }
+    #endregion
     #region Schedule Tournament
         private readonly Dictionary<ulong, PlayerStats> playerStats = new Dictionary<ulong, PlayerStats>();
         private readonly HashSet<ulong> participants = new HashSet<ulong>();
         private readonly HashSet<ulong> openTournamentPlayers = new HashSet<ulong>();
-		private readonly HashSet<ulong> inactiveParticipants = new HashSet<ulong>();
-		private Dictionary<ulong, (BasePlayer Attacker, float TimeStamp)> lastDamageRecords 
-			= new Dictionary<ulong, (BasePlayer Attacker, float TimeStamp)>();
+        private readonly HashSet<ulong> inactiveParticipants = new HashSet<ulong>();
+        private Dictionary<ulong, (BasePlayer Attacker, float TimeStamp)> lastDamageRecords 
+            = new Dictionary<ulong, (BasePlayer Attacker, float TimeStamp)>();
         private bool isTournamentRunning = false;
         private DateTime tournamentStartTime;
         private DateTime tournamentEndTime;
         private Timer countdownTimer;
 
         private bool IsWithinCutoffPeriod()
-		{
-			if (Configuration.JoinCutoffHours == 0) return true;
+        {
+            if (Configuration.JoinCutoffHours == 0) return true;
 
-			return isTournamentRunning &&
-				   DateTime.UtcNow < tournamentStartTime.AddHours(Configuration.JoinCutoffHours);
-		}
+            return isTournamentRunning &&
+                   DateTime.UtcNow < tournamentStartTime.AddHours(Configuration.JoinCutoffHours);
+        }
 
         private string FormatTimeRemaining(TimeSpan timeSpan)
         {
@@ -934,35 +1111,35 @@ namespace Oxide.Plugins
         }
 
         private void ScheduleCountdown(DateTime targetTime, Action onCompletion)
-		{
-			TimeSpan timeUntilTarget = targetTime - DateTime.UtcNow;
+        {
+            TimeSpan timeUntilTarget = targetTime - DateTime.UtcNow;
 
-			if (timeUntilTarget.TotalSeconds <= 1.0)
-			{
-				Puts($"[Debug] Timer expired immediately for target: {targetTime}. Invoking completion.");
-				onCompletion?.Invoke();
-				return;
-			}
+            if (timeUntilTarget.TotalSeconds <= 1.0)
+            {
+                Puts($"[Debug] Timer expired immediately for target: {targetTime}. Invoking completion.");
+                onCompletion?.Invoke();
+                return;
+            }
 
-			Puts($"[Debug] Starting open-ended countdown timer for about {timeUntilTarget.TotalSeconds:F1} seconds.");
-			countdownTimer?.Destroy();
+            Puts($"[Debug] Starting open-ended countdown timer for about {timeUntilTarget.TotalSeconds:F1} seconds.");
+            countdownTimer?.Destroy();
 
-			countdownTimer = timer.Every(1f, () =>
-			{
-				TimeSpan remainingTime = targetTime - DateTime.UtcNow;
-				
-				NotifyTournamentCountdown(remainingTime);
+            countdownTimer = timer.Every(1f, () =>
+            {
+                TimeSpan remainingTime = targetTime - DateTime.UtcNow;
+                
+                NotifyTournamentCountdown(remainingTime);
 
-				if (remainingTime.TotalSeconds <= 1.0)
-				{
-					Puts("[Debug] Countdown timer expired; invoking completion.");
-					countdownTimer?.Destroy();
-					countdownTimer = null;
+                if (remainingTime.TotalSeconds <= 1.0)
+                {
+                    Puts("[Debug] Countdown timer expired; invoking completion.");
+                    countdownTimer?.Destroy();
+                    countdownTimer = null;
 
-					onCompletion?.Invoke();
-				}
-			});
-		}
+                    onCompletion?.Invoke();
+                }
+            });
+        }
 
         private void ScheduleTournament()
         {
@@ -976,10 +1153,10 @@ namespace Oxide.Plugins
             {
                 DayOfWeek startDay = Enum.Parse<DayOfWeek>(Configuration.StartDay, true);
                 DateTime now = DateTime.UtcNow;
-				Puts($"[Debug] The server thinks it's currently {now:yyyy-MM-dd HH:mm:ss} UTC.");
+                Puts($"[Debug] The server thinks it's currently {now:yyyy-MM-dd HH:mm:ss} UTC.");
                 DateTime localNow = GetLocalTime(now);
-				Puts($"[Debug] localNow is {localNow:yyyy-MM-dd HH:mm:ss} (Timezone={Configuration.Timezone}).");
-				
+                Puts($"[Debug] localNow is {localNow:yyyy-MM-dd HH:mm:ss} (Timezone={Configuration.Timezone}).");
+                
                 DateTime nextStart = localNow
                 .AddDays((7 + (int)startDay - (int)localNow.DayOfWeek) % 7)
                 .Date
@@ -993,15 +1170,15 @@ namespace Oxide.Plugins
 
                 tournamentStartTime = GetUtcTime(nextStart);
                 LogEvent($"Tournament scheduled to start on {GetLocalTime(tournamentStartTime):yyyy-MM-dd HH:mm:ss} ({Configuration.Timezone}).");
-				
-				int activeCount = participantsData.Keys.Where(id => !inactiveParticipants.Contains(id)).Count();
-				string startTimeLocal = GetLocalTime(tournamentStartTime).ToString("yyyy-MM-dd HH:mm:ss");
-				string scheduleMessage = $"Heads up, warriors! The tournament kicks off at {startTimeLocal} ({Configuration.Timezone}) and will rage for {Configuration.DurationHours} hours. Already, {activeCount} heroes have signed up to battle it out. If you’re not in yet, type /open_tournament and join the fray!";
-				SendTournamentMessage(scheduleMessage);
-				if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-				{
-					SendDiscordMessage(scheduleMessage);
-				}
+                
+                int activeCount = participantsData.Keys.Where(id => !inactiveParticipants.Contains(id)).Count();
+                string startTimeLocal = GetLocalTime(tournamentStartTime).ToString("yyyy-MM-dd HH:mm:ss");
+                string scheduleMessage = $"Heads up, warriors! The tournament kicks off at {startTimeLocal} ({Configuration.Timezone}) and will rage for {Configuration.DurationHours} hours. Already, {activeCount} heroes have signed up to battle it out. If you’re not in yet, type /open_tournament and join the fray!";
+                SendTournamentMessage(scheduleMessage);
+                if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
+                {
+                    SendDiscordMessage(scheduleMessage);
+                }
 
                 ScheduleCountdown(tournamentStartTime, () =>
                 {
@@ -1126,69 +1303,69 @@ namespace Oxide.Plugins
 
                 TimeSpan remainingTime = tournamentEndTime - DateTime.UtcNow;
                 
-				// Puts($"[Debug] Tournament countdown: {FormatTimeRemaining(remainingTime)} remaining.");
+                // Puts($"[Debug] Tournament countdown: {FormatTimeRemaining(remainingTime)} remaining.");
             });
         }
     #endregion
     #region Tournament Logic
-		private void ResumeInterruptedTournament()
-		{
-			EnsureDataDirectory();
+        private void ResumeInterruptedTournament()
+        {
+            EnsureDataDirectory();
 
-			string latestFile = null;
-			foreach (var file in Directory.EnumerateFiles(DataDirectory, "Tournament_*.data"))
-			{
-				if (latestFile == null ||
-					string.Compare(Path.GetFileName(file), Path.GetFileName(latestFile), StringComparison.Ordinal) > 0)
-				{
-					latestFile = file;
-				}
-			}
-			if (latestFile == null) return;
+            string latestFile = null;
+            foreach (var file in Directory.EnumerateFiles(DataDirectory, "Tournament_*.data"))
+            {
+                if (latestFile == null ||
+                    string.Compare(Path.GetFileName(file), Path.GetFileName(latestFile), StringComparison.Ordinal) > 0)
+                {
+                    latestFile = file;
+                }
+            }
+            if (latestFile == null) return;
 
-			var lines = File.ReadAllLines(latestFile);
-			if (!lines.Any(l => l.Contains("Tournament ended successfully.")))
-			{
-				Puts($"[Info] Resuming interrupted tournament from log: {Path.GetFileName(latestFile)}");
-				currentTournamentFile = latestFile;
+            var lines = File.ReadAllLines(latestFile);
+            if (!lines.Any(l => l.Contains("Tournament ended successfully.")))
+            {
+                Puts($"[Info] Resuming interrupted tournament from log: {Path.GetFileName(latestFile)}");
+                currentTournamentFile = latestFile;
 
-				var stamp = Path.GetFileNameWithoutExtension(latestFile).Split('_')[1];
-				var startUtc = DateTime.ParseExact(
-					stamp,
-					"yyyyMMddHHmmss",
-					CultureInfo.InvariantCulture,
-					DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal
-				);
+                var stamp = Path.GetFileNameWithoutExtension(latestFile).Split('_')[1];
+                var startUtc = DateTime.ParseExact(
+                    stamp,
+                    "yyyyMMddHHmmss",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal
+                );
 
-				tournamentStartTime = startUtc;
-				tournamentEndTime = startUtc.AddHours(Configuration.DurationHours);
-				isTournamentRunning = true;
+                tournamentStartTime = startUtc;
+                tournamentEndTime = startUtc.AddHours(Configuration.DurationHours);
+                isTournamentRunning = true;
 
-				if (DateTime.UtcNow >= tournamentEndTime)
-				{
-					EndTournament();
-				}
-				else
-				{
-					ScheduleTournamentEnd();
+                if (DateTime.UtcNow >= tournamentEndTime)
+                {
+                    EndTournament();
+                }
+                else
+                {
+                    ScheduleTournamentEnd();
 
-					TimeSpan remaining = tournamentEndTime - DateTime.UtcNow;
-					var msg = FormatMessage(
-						Configuration.MessageTemplates["ResumeTournament"],
-						new Dictionary<string,string>
-						{
-							{ "TimeRemaining", FormatTimeRemaining(remaining) },
-							{ "Duration",      Configuration.DurationHours.ToString() }
-						}
-					);
+                    TimeSpan remaining = tournamentEndTime - DateTime.UtcNow;
+                    var msg = FormatMessage(
+                        Configuration.MessageTemplates["ResumeTournament"],
+                        new Dictionary<string,string>
+                        {
+                            { "TimeRemaining", FormatTimeRemaining(remaining) },
+                            { "Duration",      Configuration.DurationHours.ToString() }
+                        }
+                    );
 
-					SendTournamentMessage(msg);
-					if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-						SendDiscordMessage(msg);
-				}
-			}
-		}
-	
+                    SendTournamentMessage(msg);
+                    if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
+                        SendDiscordMessage(msg);
+                }
+            }
+        }
+    
         [ChatCommand("start_tournament")]
         private void StartTournamentCommand(BasePlayer player, string command, string[] args)
         {
@@ -1222,280 +1399,280 @@ namespace Oxide.Plugins
         }
 
         private void StartTournament()
-		{
-			Puts("[Debug] StartTournament invoked.");
-			
-			participants.Clear();
-			foreach (var id in participantsData.Keys)
-				participants.Add(id);
-			Puts("[Debug] Participants HashSet rebuilt for new tournament.");
+        {
+            Puts("[Debug] StartTournament invoked.");
+            
+            participants.Clear();
+            foreach (var id in participantsData.Keys)
+                participants.Add(id);
+            Puts("[Debug] Participants HashSet rebuilt for new tournament.");
 
-			foreach (var p in participantsData.Values)
-				p.Score = 0;
-			SaveParticipantsData();
-			Puts("[Debug] All participant scores reset to 0 and saved.");
+            foreach (var p in participantsData.Values)
+                p.Score = 0;
+            SaveParticipantsData();
+            Puts("[Debug] All participant scores reset to 0 and saved.");
 
-			StartTournamentFile();
+            StartTournamentFile();
 
-			try
-			{
-				Puts($"[Debug] Current state: isTournamentRunning={isTournamentRunning}, tournamentEndTime={tournamentEndTime:yyyy-MM-dd HH:mm:ss} UTC.");
+            try
+            {
+                Puts($"[Debug] Current state: isTournamentRunning={isTournamentRunning}, tournamentEndTime={tournamentEndTime:yyyy-MM-dd HH:mm:ss} UTC.");
 
-				if (isTournamentRunning)
-				{
-					Puts("[Debug] Attempted to start tournament, but one is already running.");
-					return;
-				}
+                if (isTournamentRunning)
+                {
+                    Puts("[Debug] Attempted to start tournament, but one is already running.");
+                    return;
+                }
 
-				if (Configuration.DurationHours <= 0.0167)
-				{
-					PrintError("[Error] Invalid tournament duration. Ensure `DurationHours` > 0.");
-					return;
-				}
+                if (Configuration.DurationHours <= 0.0167)
+                {
+                    PrintError("[Error] Invalid tournament duration. Ensure `DurationHours` > 0.");
+                    return;
+                }
 
-				isTournamentRunning = true;
-				tournamentEndTime = DateTime.UtcNow.AddHours(Configuration.DurationHours);
-				Puts($"[Info] Tournament started. Duration: {Configuration.DurationHours} hours. Ends at: {tournamentEndTime:yyyy-MM-dd HH:mm:ss} UTC.");
+                isTournamentRunning = true;
+                tournamentEndTime = DateTime.UtcNow.AddHours(Configuration.DurationHours);
+                Puts($"[Info] Tournament started. Duration: {Configuration.DurationHours} hours. Ends at: {tournamentEndTime:yyyy-MM-dd HH:mm:ss} UTC.");
 
-				playerStats.Clear();
+                playerStats.Clear();
 
-				if (countdownTimer != null)
-				{
-					Puts("[Debug] Destroying existing countdown timer.");
-					countdownTimer.Destroy();
-					countdownTimer = null;
-				}
+                if (countdownTimer != null)
+                {
+                    Puts("[Debug] Destroying existing countdown timer.");
+                    countdownTimer.Destroy();
+                    countdownTimer = null;
+                }
 
-				if (participantsData.Values.Any())
-					LogEvent($"[Info] Participants at tournament start: {string.Join(", ", participantsData.Values.Select(p => p.Name))}");
-				else
-					LogEvent("[Info] No participants at tournament start.");
+                if (participantsData.Values.Any())
+                    LogEvent($"[Info] Participants at tournament start: {string.Join(", ", participantsData.Values.Select(p => p.Name))}");
+                else
+                    LogEvent("[Info] No participants at tournament start.");
 
-				LogEvent("[Info] Tournament started successfully.");
+                LogEvent("[Info] Tournament started successfully.");
 
-				ScheduleTournamentEnd();
+                ScheduleTournamentEnd();
 
-				string globalMessage = FormatMessage(Configuration.MessageTemplates["StartTournament"], new Dictionary<string, string>
-				{
-					{ "TimeRemaining", FormatTimeRemaining(tournamentEndTime - DateTime.UtcNow) },
-					{ "Duration", Configuration.DurationHours.ToString() }
-				});
-				SendTournamentMessage(globalMessage);
+                string globalMessage = FormatMessage(Configuration.MessageTemplates["StartTournament"], new Dictionary<string, string>
+                {
+                    { "TimeRemaining", FormatTimeRemaining(tournamentEndTime - DateTime.UtcNow) },
+                    { "Duration", Configuration.DurationHours.ToString() }
+                });
+                SendTournamentMessage(globalMessage);
 
-				if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-				{
-					Puts("[Debug] Sending Discord notification for tournament start.");
-					SendDiscordMessage(globalMessage);
-				}
-			}
-			catch (Exception ex)
-			{
-				PrintError($"[Error] Failed to start tournament: {ex.Message}");
-			}
-		}
-		
-		private string GetGroupKey(ulong userId)
-		{
-			if (Clans != null)
-			{
-				var clanTag = Clans.Call("GetClanTag", userId) as string;
-				if (!string.IsNullOrEmpty(clanTag))
-					return clanTag;
-			}
+                if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
+                {
+                    Puts("[Debug] Sending Discord notification for tournament start.");
+                    SendDiscordMessage(globalMessage);
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintError($"[Error] Failed to start tournament: {ex.Message}");
+            }
+        }
+        
+        private string GetGroupKey(ulong userId)
+        {
+            if (Clans != null)
+            {
+                var clanTag = Clans.Call("GetClanTag", userId) as string;
+                if (!string.IsNullOrEmpty(clanTag))
+                    return clanTag;
+            }
 
-			var basePlayer = BasePlayer.FindByID(userId);
-			if (basePlayer != null && basePlayer.currentTeam != 0)
-			{
-				ulong teamId = basePlayer.currentTeam;
-				if (!teamLeaderNames.ContainsKey(teamId) &&
-					RelationshipManager.ServerInstance.teams.TryGetValue(teamId, out var team) &&
-					team.teamLeader == userId)
-				{
-					teamLeaderNames[teamId] = basePlayer.displayName;
-					SaveTeamLeaderNames();
-					Puts($"[Debug] Leader {basePlayer.displayName} cached for team {teamId} via GetGroupKey()");
-				}
+            var basePlayer = BasePlayer.FindByID(userId);
+            if (basePlayer != null && basePlayer.currentTeam != 0)
+            {
+                ulong teamId = basePlayer.currentTeam;
+                if (!teamLeaderNames.ContainsKey(teamId) &&
+                    RelationshipManager.ServerInstance.teams.TryGetValue(teamId, out var team) &&
+                    team.teamLeader == userId)
+                {
+                    teamLeaderNames[teamId] = basePlayer.displayName;
+                    SaveTeamLeaderNames();
+                    Puts($"[Debug] Leader {basePlayer.displayName} cached for team {teamId} via GetGroupKey()");
+                }
 
-				return teamId.ToString();
-			}
+                return teamId.ToString();
+            }
 
-			var groups = permission.GetUserGroups(userId.ToString());
-			return groups.Length > 0 ? groups[0] : null;
-		}
+            var groups = permission.GetUserGroups(userId.ToString());
+            return groups.Length > 0 ? groups[0] : null;
+        }
 
         private void EndTournament()
-			{
-				Puts("[Debug] EndTournament invoked.");
+            {
+                Puts("[Debug] EndTournament invoked.");
 
-				try
-				{
-					if (!isTournamentRunning)
-					{
-						Puts("[Debug] No tournament is currently running.");
-						return;
-					}
+                try
+                {
+                    if (!isTournamentRunning)
+                    {
+                        Puts("[Debug] No tournament is currently running.");
+                        return;
+                    }
 
-					isTournamentRunning = false;
-					Puts("RustRoyale: Tournament ended!");
+                    isTournamentRunning = false;
+                    Puts("RustRoyale: Tournament ended!");
 
-					var sortedParticipants = participantsData.Values
-						.OrderByDescending(p => p.Score)
-						.ToList();
+                    var sortedParticipants = participantsData.Values
+                        .OrderByDescending(p => p.Score)
+                        .ToList();
 
-					SaveTournamentHistory(sortedParticipants);
-					LogEvent("Tournament ended successfully.");
+                    SaveTournamentHistory(sortedParticipants);
+                    LogEvent("Tournament ended successfully.");
 
-					string resultsMessage = "Leaderboard:\n";
-					if (sortedParticipants.Any())
-					{
-						resultsMessage += string.Join("\n", sortedParticipants
-							.Select((p, idx) => $"{idx + 1}. {p.Name} - {p.Score} Points"));
-					}
-					else
-					{
-						resultsMessage += "No participants scored points in this tournament.";
-					}
+                    string resultsMessage = "Leaderboard:\n";
+                    if (sortedParticipants.Any())
+                    {
+                        resultsMessage += string.Join("\n", sortedParticipants
+                            .Select((p, idx) => $"{idx + 1}. {p.Name} - {p.Score} Points"));
+                    }
+                    else
+                    {
+                        resultsMessage += "No participants scored points in this tournament.";
+                    }
 
-					var clanTotals = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-					var groupNames = new Dictionary<string, string>();
+                    var clanTotals = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                    var groupNames = new Dictionary<string, string>();
 
-					foreach (var ps in participantsData.Values)
-					{
-						string groupKey = GetGroupKey(ps.UserId);
+                    foreach (var ps in participantsData.Values)
+                    {
+                        string groupKey = GetGroupKey(ps.UserId);
 
-						if (string.IsNullOrEmpty(groupKey) ||
-							groupKey.Equals("default", StringComparison.OrdinalIgnoreCase) ||
-							groupKey.Equals("No Group", StringComparison.OrdinalIgnoreCase))
-							continue;
+                        if (string.IsNullOrEmpty(groupKey) ||
+                            groupKey.Equals("default", StringComparison.OrdinalIgnoreCase) ||
+                            groupKey.Equals("No Group", StringComparison.OrdinalIgnoreCase))
+                            continue;
 
-						string displayName = groupKey;
+                        string displayName = groupKey;
 
-						if (ulong.TryParse(groupKey, out ulong teamId) &&
-							RelationshipManager.ServerInstance.teams.ContainsKey(teamId))
-						{
-							if (teamLeaderNames.TryGetValue(teamId, out var cachedName))
-								{
-									displayName = $"{cachedName}'s team";
-								}
-								else
-								{
-									displayName = $"Team {teamId}";
-								}
-						}
+                        if (ulong.TryParse(groupKey, out ulong teamId) &&
+                            RelationshipManager.ServerInstance.teams.ContainsKey(teamId))
+                        {
+                            if (teamLeaderNames.TryGetValue(teamId, out var cachedName))
+                                {
+                                    displayName = $"{cachedName}'s team";
+                                }
+                                else
+                                {
+                                    displayName = $"Team {teamId}";
+                                }
+                        }
 
-						groupNames[groupKey] = displayName;
+                        groupNames[groupKey] = displayName;
 
-						if (!clanTotals.ContainsKey(groupKey))
-							clanTotals[groupKey] = 0;
+                        if (!clanTotals.ContainsKey(groupKey))
+                            clanTotals[groupKey] = 0;
 
-						clanTotals[groupKey] += ps.Score;
-					}
+                        clanTotals[groupKey] += ps.Score;
+                    }
 
-					var topClans = clanTotals
-						.OrderByDescending(kv => kv.Value)
-						.Take(Configuration.TopClansToTrack)
-						.ToList();
+                    var topClans = clanTotals
+                        .OrderByDescending(kv => kv.Value)
+                        .Take(Configuration.TopClansToTrack)
+                        .ToList();
 
-					var globalMessage = new StringBuilder();
-					globalMessage.AppendLine(FormatMessage(Configuration.MessageTemplates["EndTournament"], new Dictionary<string, string>()));
-					globalMessage.AppendLine();
-					globalMessage.AppendLine(resultsMessage);
+                    var globalMessage = new StringBuilder();
+                    globalMessage.AppendLine(FormatMessage(Configuration.MessageTemplates["EndTournament"], new Dictionary<string, string>()));
+                    globalMessage.AppendLine();
+                    globalMessage.AppendLine(resultsMessage);
 
-					if (topClans.Any())
-					{
-						globalMessage.AppendLine();
-						globalMessage.AppendLine("Top Clans/Groups:");
-						globalMessage.AppendLine(string.Join("\n", topClans
-							.Select((kv, idx) =>
-							{
-								string name = groupNames.ContainsKey(kv.Key) ? groupNames[kv.Key] : kv.Key;
-								return $"{idx + 1}. {name} ({kv.Value} pts)";
-							})));
-					}
+                    if (topClans.Any())
+                    {
+                        globalMessage.AppendLine();
+                        globalMessage.AppendLine("Top Clans/Groups:");
+                        globalMessage.AppendLine(string.Join("\n", topClans
+                            .Select((kv, idx) =>
+                            {
+                                string name = groupNames.ContainsKey(kv.Key) ? groupNames[kv.Key] : kv.Key;
+                                return $"{idx + 1}. {name} ({kv.Value} pts)";
+                            })));
+                    }
 
-					SendTournamentMessage(globalMessage.ToString().TrimEnd());
-					if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-						SendDiscordMessage(globalMessage.ToString().TrimEnd());
+                    SendTournamentMessage(globalMessage.ToString().TrimEnd());
+                    if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
+                        SendDiscordMessage(globalMessage.ToString().TrimEnd());
 
-					Puts($"[Debug] Notifications sent for tournament end:\n{globalMessage}");
-					Puts($"[Debug] Tournament successfully ended. Total participants: {sortedParticipants.Count}");
+                    Puts($"[Debug] Notifications sent for tournament end:\n{globalMessage}");
+                    Puts($"[Debug] Tournament successfully ended. Total participants: {sortedParticipants.Count}");
 
-					foreach (var p in participantsData.Values)
-						p.Score = 0;
-					SaveParticipantsData();
-					Puts("[Debug] All participant scores reset to 0 and saved at tournament end.");
+                    foreach (var p in participantsData.Values)
+                        p.Score = 0;
+                    SaveParticipantsData();
+                    Puts("[Debug] All participant scores reset to 0 and saved at tournament end.");
 
-					countdownTimer?.Destroy();
-					countdownTimer = null;
-					Puts("[Debug] Scheduling the next tournament.");
-					ScheduleTournament();
-				}
-				catch (Exception ex)
-				{
-					PrintError($"Failed to end tournament: {ex.Message}");
-				}
-			}
+                    countdownTimer?.Destroy();
+                    countdownTimer = null;
+                    Puts("[Debug] Scheduling the next tournament.");
+                    ScheduleTournament();
+                }
+                catch (Exception ex)
+                {
+                    PrintError($"Failed to end tournament: {ex.Message}");
+                }
+            }
 
         private void OnPlayerInit(BasePlayer player)
-		{
-			if (player == null || string.IsNullOrEmpty(player.displayName))
-				return;
+        {
+            if (player == null || string.IsNullOrEmpty(player.displayName))
+                return;
 
-			playerNameCache[player.userID] = player.displayName;
+            playerNameCache[player.userID] = player.displayName;
 
-			if (player.currentTeam != 0 &&
-				RelationshipManager.ServerInstance.teams.TryGetValue(player.currentTeam, out var team) &&
-				team.teamLeader == player.userID)
-			{
-				if (!teamLeaderNames.ContainsKey(player.currentTeam))
-				{
-					teamLeaderNames[player.currentTeam] = player.displayName;
-					SaveTeamLeaderNames();
-					Puts($"[Debug] Cached leader name '{player.displayName}' for team {player.currentTeam}");
-				}
-			}
+            if (player.currentTeam != 0 &&
+                RelationshipManager.ServerInstance.teams.TryGetValue(player.currentTeam, out var team) &&
+                team.teamLeader == player.userID)
+            {
+                if (!teamLeaderNames.ContainsKey(player.currentTeam))
+                {
+                    teamLeaderNames[player.currentTeam] = player.displayName;
+                    SaveTeamLeaderNames();
+                    Puts($"[Debug] Cached leader name '{player.displayName}' for team {player.currentTeam}");
+                }
+            }
 
-			if (participantsData.TryGetValue(player.userID, out var participant) && participant.Name == "Unknown")
-			{
-				participant.Name = player.displayName;
-				SaveParticipantsData();
-				Puts($"Updated participant data: {player.userID} now has name '{player.displayName}'.");
-			}
+            if (participantsData.TryGetValue(player.userID, out var participant) && participant.Name == "Unknown")
+            {
+                participant.Name = player.displayName;
+                SaveParticipantsData();
+                Puts($"Updated participant data: {player.userID} now has name '{player.displayName}'.");
+            }
 
-			if (Configuration.AutoEnrollEnabled && !autoEnrollBlacklist.Contains(player.userID) && !participantsData.ContainsKey(player.userID))
-			{
-				participantsData.TryAdd(player.userID, new PlayerStats(player.userID));
+            if (Configuration.AutoEnrollEnabled && !autoEnrollBlacklist.Contains(player.userID) && !participantsData.ContainsKey(player.userID))
+            {
+                participantsData.TryAdd(player.userID, new PlayerStats(player.userID));
 
-				if (isTournamentRunning)
-				{
-					participants.Add(player.userID);
-					Puts($"[Debug] {player.displayName} was auto-enrolled and added to active tournament participants.");
-				}
+                if (isTournamentRunning)
+                {
+                    participants.Add(player.userID);
+                    Puts($"[Debug] {player.displayName} was auto-enrolled and added to active tournament participants.");
+                }
 
-				SaveParticipantsData();
-				SendPlayerMessage(player, "You have been automatically enrolled into the RustRoyale tournament system, you can opt out by entering /close_tournament.");
-				Puts($"[Debug] Automatically enrolled player: {player.displayName} ({player.userID})");
-			}
-		}
-		
-		private void OnPlayerConnected(BasePlayer player)
-		{
-			if (player == null) return;
+                SaveParticipantsData();
+                SendPlayerMessage(player, "You have been automatically enrolled into the RustRoyale tournament system, you can opt out by entering /close_tournament.");
+                Puts($"[Debug] Automatically enrolled player: {player.displayName} ({player.userID})");
+            }
+        }
+        
+        private void OnPlayerConnected(BasePlayer player)
+        {
+            if (player == null) return;
 
-			timer.Once(2f, () =>
-			{
-				if (player == null || !player.IsConnected)
-					return;
+            timer.Once(2f, () =>
+            {
+                if (player == null || !player.IsConnected)
+                    return;
 
-				OnPlayerInit(player); // Always initialize player regardless of welcome UI
+                OnPlayerInit(player);
 
-				if (Configuration.ShowWelcomeUI && !welcomeOptOut.Contains(player.userID))
-				{
-					Puts($"[Debug] Showing welcome UI for {player.displayName} ({player.UserIDString})");
-					ShowWelcomeUI(player);
-				}
-			});
-		}
+                if (Configuration.ShowWelcomeUI && !welcomeOptOut.Contains(player.userID))
+                {
+                    Puts($"[Debug] Showing welcome UI for {player.displayName} ({player.UserIDString})");
+                    ShowWelcomeUI(player);
+                }
+            });
+        }
 
         private void OnPlayerDisconnected(BasePlayer player)
         {
@@ -1504,387 +1681,387 @@ namespace Oxide.Plugins
                 playerNameCache.TryRemove(player.userID, out _);
             }
         }
-	#endregion
-	#region DeathHandlers	
+    #endregion
+    #region DeathHandlers   
         private readonly ConcurrentDictionary<ulong, DateTime> recentDeaths = new ConcurrentDictionary<ulong, DateTime>();
         private const int RecentDeathWindowSeconds = 5;
 
-		private void OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
-		{
-			if (entity is BasePlayer victim && info != null && info.InitiatorPlayer != null)
-			{
-				lastDamageRecords[victim.userID] = (info.InitiatorPlayer, UnityEngine.Time.realtimeSinceStartup);
-			}
-		}
-		
-		private static readonly Dictionary<string, string> NpcNameMap = new Dictionary<string, string>
-		{
-			{ "scientist", "Scientist" },
-			{ "scientistnpc", "Scientist" },
-			{ "scientistnpcnew", "Scientist" },
-			{ "npcmurderer", "Murderer" },
-			{ "scarecrow", "Scarecrow" },
-			{ "tunneldweller", "Tunnel Dweller" },
-			{ "underwaterdweller", "Underwater Dweller" },
-			{ "bandit_guard", "Bandit Guard" },
-			{ "npc_bandit_guard", "Bandit Guard" },
-			{ "npc_player", "NPC Player" },
-		};
-		
-		private string GetFriendlyNpcName(string prefab)
-		{
-			if (string.IsNullOrEmpty(prefab)) return "Unknown";
-			var lower = prefab.ToLowerInvariant();
+        private void OnEntityTakeDamage(BaseCombatEntity entity, HitInfo info)
+        {
+            if (entity is BasePlayer victim && info != null && info.InitiatorPlayer != null)
+            {
+                lastDamageRecords[victim.userID] = (info.InitiatorPlayer, UnityEngine.Time.realtimeSinceStartup);
+            }
+        }
+        
+        private static readonly Dictionary<string, string> NpcNameMap = new Dictionary<string, string>
+        {
+            { "scientist",         "Scientist" },
+            { "scientistnpc",      "Scientist" },
+            { "scientistnpcnew",   "Scientist" },
+            { "npcmurderer",       "Murderer" },
+            { "scarecrow",         "Scarecrow" },
+            { "tunneldweller",     "Tunnel Dweller" },
+            { "underwaterdweller", "Underwater Dweller" },
+            { "bandit_guard",      "Bandit Guard" },
+            { "npc_bandit_guard",  "Bandit Guard" },
+            { "npc_player",        "NPC Player" },
+        };
+        
+        private string GetFriendlyNpcName(string prefab)
+        {
+            if (string.IsNullOrEmpty(prefab)) return "Unknown";
+            var lower = prefab.ToLowerInvariant();
 
-			foreach (var kvp in NpcNameMap)
-			{
-				if (lower == kvp.Key || lower.StartsWith(kvp.Key + ".") || lower.StartsWith(kvp.Key + "_"))
-					return kvp.Value;
-			}
+            foreach (var kvp in NpcNameMap)
+            {
+                if (lower == kvp.Key || lower.StartsWith(kvp.Key + ".") || lower.StartsWith(kvp.Key + "_"))
+                    return kvp.Value;
+            }
 
-			return prefab;
-		}
-		
-		private static readonly Dictionary<string, string> TrapNameMap = new Dictionary<string, string>
-		{
-			{ "autoturret_deployed",         "autoturret" },
-			{ "guntrap",                     "guntrap" },
-			{ "flameturret.deployed",        "flameturret" },
-			{ "beartrap",                    "bear trap" },
-			{ "wooden_floor_spike_cluster",  "floor spike" },
-			{ "landmine",                    "landmine" },
-			{ "barricade",                   "barricade" }
-		};
-		
-		private string GetFriendlyTrapName(string prefabName)
-		{
-			if (string.IsNullOrEmpty(prefabName)) return "Unknown";
-			return TrapNameMap.TryGetValue(prefabName.ToLowerInvariant(), out var friendly) ? friendly : prefabName;
-		}
-		
-		private static readonly Dictionary<string, string> AnimalNameMap = new Dictionary<string, string>
-		{
-			{ "wolf",        "Wolf" },
-			{ "boar",        "Boar" },
-			{ "bear",        "Bear" },
-			{ "polar_bear",  "Polar Bear" },
-			{ "polarbear",   "Polar Bear" },
-			{ "stag",        "Deer" },
-			{ "deer",        "Deer" },
-			{ "chicken",     "Chicken" },
-			{ "horse",       "Horse" },
-			{ "crocodile",   "Crocodile" },
-			{ "panther",     "Panther" },
-			{ "tiger",       "Tiger" },
-			{ "snake",       "Snake" }
-		};
+            return prefab;
+        }
+        
+        private static readonly Dictionary<string, string> TrapNameMap = new Dictionary<string, string>
+        {
+            { "autoturret_deployed",         "autoturret" },
+            { "guntrap",                     "guntrap" },
+            { "flameturret.deployed",        "flameturret" },
+            { "beartrap",                    "bear trap" },
+            { "wooden_floor_spike_cluster",  "floor spike" },
+            { "landmine",                    "landmine" },
+            { "barricade",                   "barricade" }
+        };
+        
+        private string GetFriendlyTrapName(string prefabName)
+        {
+            if (string.IsNullOrEmpty(prefabName)) return "Unknown";
+            return TrapNameMap.TryGetValue(prefabName.ToLowerInvariant(), out var friendly) ? friendly : prefabName;
+        }
+        
+        private static readonly Dictionary<string, string> AnimalNameMap = new Dictionary<string, string>
+        {
+            { "wolf",        "Wolf" },
+            { "boar",        "Boar" },
+            { "bear",        "Bear" },
+            { "polar_bear",  "Polar Bear" },
+            { "polarbear",   "Polar Bear" },
+            { "stag",        "Deer" },
+            { "deer",        "Deer" },
+            { "chicken",     "Chicken" },
+            { "horse",       "Horse" },
+            { "crocodile",   "Crocodile" },
+            { "panther",     "Panther" },
+            { "tiger",       "Tiger" },
+            { "snake",       "Snake" }
+        };
 
-		private bool IsAnimalKill(string prefabName)
-		{
-			if (string.IsNullOrEmpty(prefabName)) return false;
-			var lower = prefabName.ToLowerInvariant();
+        private bool IsAnimalKill(string prefabName)
+        {
+            if (string.IsNullOrEmpty(prefabName)) return false;
+            var lower = prefabName.ToLowerInvariant();
 
-			bool match = AnimalNameMap.Keys.Any(animal =>
-				lower == animal ||
-				lower.StartsWith(animal + ".") ||
-				lower.StartsWith(animal + "_") ||
-				lower.StartsWith(animal + "2"));
+            bool match = AnimalNameMap.Keys.Any(animal =>
+                lower == animal ||
+                lower.StartsWith(animal + ".") ||
+                lower.StartsWith(animal + "_") ||
+                lower.StartsWith(animal + "2"));
 
-			if (!match)
-				Puts($"[Debug] Skipped prefab '{lower}' in IsAnimalKill()");
+            if (!match)
+                Puts($"[Debug] Skipped prefab '{lower}' in IsAnimalKill()");
 
-			return match;
-		}
-		
-		private string GetFriendlyAnimalName(string prefab)
-		{
-			if (string.IsNullOrEmpty(prefab)) return "Unknown";
+            return match;
+        }
+        
+        private string GetFriendlyAnimalName(string prefab)
+        {
+            if (string.IsNullOrEmpty(prefab)) return "Unknown";
 
-			string lower = prefab.ToLowerInvariant();
+            string lower = prefab.ToLowerInvariant();
 
-			foreach (var kvp in AnimalNameMap)
-			{
-				if (lower == kvp.Key ||
-					lower.StartsWith(kvp.Key + ".") ||
-					lower.StartsWith(kvp.Key + "_") ||
-					lower.StartsWith(kvp.Key + "2"))
-				{
-					return kvp.Value;
-				}
-			}
+            foreach (var kvp in AnimalNameMap)
+            {
+                if (lower == kvp.Key ||
+                    lower.StartsWith(kvp.Key + ".") ||
+                    lower.StartsWith(kvp.Key + "_") ||
+                    lower.StartsWith(kvp.Key + "2"))
+                {
+                    return kvp.Value;
+                }
+            }
 
-			return prefab;
-		}
+            return prefab;
+        }
 
-		private void OnPlayerDeath(BasePlayer victim, HitInfo info)
-		{
-			if (!isTournamentRunning || victim == null)
-				return;
+        private void OnPlayerDeath(BasePlayer victim, HitInfo info)
+        {
+            if (!isTournamentRunning || victim == null)
+                return;
 
-			if (IsRecentDeath(victim))
-				return;
+            if (IsRecentDeath(victim))
+                return;
 
-			var attacker = ResolveAttacker(victim, info);
-			var entity = info?.Initiator as BaseCombatEntity;
+            var attacker = ResolveAttacker(victim, info);
+            var entity = info?.Initiator as BaseCombatEntity;
 
-			if (HandleHeliOrBradleyKill(victim, entity, info)) return;
-			if (HandleNpcOrUnownedEntityKill(victim, attacker, entity, info)) return;
-			if (HandlePlayerKill(victim, attacker, info)) return;
-			if (HandleTrapKill(victim, entity, info)) return;
-			if (HandleNpcKilledByPlayer(victim, attacker, info)) return;
-			if (HandleNpcKilledByTrap(victim, entity, info)) return;
-			if (HandleSelfInflicted(victim, attacker, info)) return;
+            if (HandleHeliOrBradleyKill(victim, entity, info)) return;
+            if (HandleNpcOrUnownedEntityKill(victim, attacker, entity, info)) return;
+            if (HandlePlayerKill(victim, attacker, info)) return;
+            if (HandleTrapKill(victim, entity, info)) return;
+            if (HandleNpcKilledByPlayer(victim, attacker, info)) return;
+            if (HandleNpcKilledByTrap(victim, entity, info)) return;
+            if (HandleSelfInflicted(victim, attacker, info)) return;
 
-			Puts($"[Debug] ❌ No handler matched for {victim.displayName}'s death. Entity: {entity?.ShortPrefabName ?? "unknown"}");
-			lastDamageRecords.Remove(victim.userID);
-		}
-		
-		private bool IsRecentDeath(BasePlayer victim)
-		{
-			if (recentDeaths.TryGetValue(victim.userID, out var lastDeathTime) &&
-				(DateTime.UtcNow - lastDeathTime).TotalSeconds < RecentDeathWindowSeconds)
-			{
-				Puts($"[Debug] Ignoring duplicate death event for {victim.displayName}. Last death: {lastDeathTime}.");
-				return true;
-			}
+            Puts($"[Debug] ❌ No handler matched for {victim.displayName}'s death. Entity: {entity?.ShortPrefabName ?? "unknown"}");
+            lastDamageRecords.Remove(victim.userID);
+        }
+        
+        private bool IsRecentDeath(BasePlayer victim)
+        {
+            if (recentDeaths.TryGetValue(victim.userID, out var lastDeathTime) &&
+                (DateTime.UtcNow - lastDeathTime).TotalSeconds < RecentDeathWindowSeconds)
+            {
+                Puts($"[Debug] Ignoring duplicate death event for {victim.displayName}. Last death: {lastDeathTime}.");
+                return true;
+            }
 
-			recentDeaths[victim.userID] = DateTime.UtcNow;
-			return false;
-		}
+            recentDeaths[victim.userID] = DateTime.UtcNow;
+            return false;
+        }
 
-		private BasePlayer ResolveAttacker(BasePlayer victim, HitInfo info)
-		{
-			var attacker = info?.InitiatorPlayer;
-			if (attacker == null || attacker == victim)
-			{
-				if (lastDamageRecords.TryGetValue(victim.userID, out var record))
-				{
-					float timeSinceLastHit = UnityEngine.Time.realtimeSinceStartup - record.TimeStamp;
-					if (timeSinceLastHit <= 30f)
-					{
-						attacker = record.Attacker;
-						Puts($"[Debug] Overriding final attacker with last real attacker: {attacker?.displayName}");
-					}
-				}
-			}
-			return attacker;
-		}
+        private BasePlayer ResolveAttacker(BasePlayer victim, HitInfo info)
+        {
+            var attacker = info?.InitiatorPlayer;
+            if (attacker == null || attacker == victim)
+            {
+                if (lastDamageRecords.TryGetValue(victim.userID, out var record))
+                {
+                    float timeSinceLastHit = UnityEngine.Time.realtimeSinceStartup - record.TimeStamp;
+                    if (timeSinceLastHit <= 30f)
+                    {
+                        attacker = record.Attacker;
+                        Puts($"[Debug] Overriding final attacker with last real attacker: {attacker?.displayName}");
+                    }
+                }
+            }
+            return attacker;
+        }
 
-		private bool HandleHeliOrBradleyKill(BasePlayer victim, BaseCombatEntity entity, HitInfo info)
-		{
-			if (entity == null || !participants.Contains(victim.userID)) return false;
+        private bool HandleHeliOrBradleyKill(BasePlayer victim, BaseCombatEntity entity, HitInfo info)
+        {
+            if (entity == null || !participants.Contains(victim.userID)) return false;
 
-			string prefab = entity.ShortPrefabName ?? "";
-			if (!prefab.Contains("helicopter") && !prefab.Contains("bradley")) return false;
+            string prefab = entity.ShortPrefabName ?? "";
+            if (!prefab.Contains("helicopter") && !prefab.Contains("bradley")) return false;
 
-			string type = prefab.Contains("helicopter") ? "Helicopter" : "Bradley";
+            string type = prefab.Contains("helicopter") ? "Helicopter" : "Bradley";
 
-			if (Configuration.ScoreRules.TryGetValue("BRUH", out int points))
-			{
-				UpdatePlayerScore(victim.userID, "BRUH", $"getting defeated by a {type}", victim, info, entityName: type);
-				Puts($"[Debug] {victim.displayName} lost points for being defeated by a {type}.");
-			}
-			return true;
-		}
+            if (Configuration.ScoreRules.TryGetValue("BRUH", out int points))
+            {
+                UpdatePlayerScore(victim.userID, "BRUH", $"getting defeated by a {type}", victim, info, entityName: type);
+                Puts($"[Debug] {victim.displayName} lost points for being defeated by a {type}.");
+            }
+            return true;
+        }
 
-		private bool HandleNpcOrUnownedEntityKill(BasePlayer victim, BasePlayer attacker, BaseCombatEntity entity, HitInfo info)
-		{
-			ulong ownerId = entity?.OwnerID ?? 0;
-			bool isNpcKill = attacker != null && attacker.IsNpc;
-			bool isUnownedEntity = entity != null && ownerId == 0 && (attacker == null || attacker.IsNpc);
+        private bool HandleNpcOrUnownedEntityKill(BasePlayer victim, BasePlayer attacker, BaseCombatEntity entity, HitInfo info)
+        {
+            ulong ownerId = entity?.OwnerID ?? 0;
+            bool isNpcKill = attacker != null && attacker.IsNpc;
+            bool isUnownedEntity = entity != null && ownerId == 0 && (attacker == null || attacker.IsNpc);
 
-			if (!isNpcKill && !isUnownedEntity) return false;
+            if (!isNpcKill && !isUnownedEntity) return false;
 
-			string attackerName = attacker?.ShortPrefabName ?? entity?.ShortPrefabName ?? "Unknown";
-			attackerName = GetFriendlyNpcName(attackerName);
+            string attackerName = attacker?.ShortPrefabName ?? entity?.ShortPrefabName ?? "Unknown";
+            attackerName = GetFriendlyNpcName(attackerName);
 
-			if (participants.Contains(victim.userID) && Configuration.ScoreRules.TryGetValue("BRUH", out int points))
-			{
-				UpdatePlayerScore(victim.userID, "BRUH", $"being defeated by {attackerName}", victim, info, entityName: attackerName);
-				Puts($"[Debug] {victim.displayName} lost points for being defeated by {attackerName}.");
-			}
-			return true;
-		}
+            if (participants.Contains(victim.userID) && Configuration.ScoreRules.TryGetValue("BRUH", out int points))
+            {
+                UpdatePlayerScore(victim.userID, "BRUH", $"being defeated by {attackerName}", victim, info, entityName: attackerName);
+                Puts($"[Debug] {victim.displayName} lost points for being defeated by {attackerName}.");
+            }
+            return true;
+        }
 
-		private bool HandlePlayerKill(BasePlayer victim, BasePlayer attacker, HitInfo info)
-		{
-			if (attacker == null || !participants.Contains(attacker.userID) || !participants.Contains(victim.userID))
-				return false;
+        private bool HandlePlayerKill(BasePlayer victim, BasePlayer attacker, HitInfo info)
+        {
+            if (attacker == null || !participants.Contains(attacker.userID) || !participants.Contains(victim.userID))
+                return false;
 
-			if (Configuration.ScoreRules.TryGetValue("DEAD", out int pointsForVictim) &&
-				Configuration.ScoreRules.TryGetValue("KILL", out int pointsForAttacker))
-			{
-				UpdatePlayerScore(victim.userID, "DEAD", $"killed by {attacker.displayName}", victim);
-				UpdatePlayerScore(attacker.userID, "KILL", $"eliminated {victim.displayName}", victim);
-				Puts($"[Debug] {attacker.displayName} killed {victim.displayName}.");
-			}
+            if (Configuration.ScoreRules.TryGetValue("DEAD", out int pointsForVictim) &&
+                Configuration.ScoreRules.TryGetValue("KILL", out int pointsForAttacker))
+            {
+                UpdatePlayerScore(victim.userID, "DEAD", $"killed by {attacker.displayName}", victim);
+                UpdatePlayerScore(attacker.userID, "KILL", $"eliminated {victim.displayName}", victim);
+                Puts($"[Debug] {attacker.displayName} killed {victim.displayName}.");
+            }
 
-			return true;
-		}
+            return true;
+        }
 
-		private bool HandleTrapKill(BasePlayer victim, BaseCombatEntity entity, HitInfo info)
-		{
-			if (entity == null || !participants.Contains(victim.userID)) return false;
+        private bool HandleTrapKill(BasePlayer victim, BaseCombatEntity entity, HitInfo info)
+        {
+            if (entity == null || !participants.Contains(victim.userID)) return false;
 
-			string entityName = entity.ShortPrefabName ?? "Unknown";
-			string friendlyName = GetFriendlyTrapName(entityName);
-			ulong ownerId = entity.OwnerID;
-			string ownerName = ownerId != 0 ? GetPlayerName(ownerId) : "Unknown";
+            string entityName = entity.ShortPrefabName ?? "Unknown";
+            string friendlyName = GetFriendlyTrapName(entityName);
+            ulong ownerId = entity.OwnerID;
+            string ownerName = ownerId != 0 ? GetPlayerName(ownerId) : "Unknown";
 
-			if (ownerId == victim.userID && Configuration.ScoreRules.TryGetValue("BRUH", out int bruhPoints))
-			{
-				UpdatePlayerScore(victim.userID, "BRUH", $"being defeated by their own {friendlyName}", victim, info, attackerName: ownerName, entityName: friendlyName);
-				return true;
-			}
+            if (ownerId == victim.userID && Configuration.ScoreRules.TryGetValue("BRUH", out int bruhPoints))
+            {
+                UpdatePlayerScore(victim.userID, "BRUH", $"being defeated by their own {friendlyName}", victim, info, attackerName: ownerName, entityName: friendlyName);
+                return true;
+            }
 
-			if (ownerId != 0 && participants.Contains(ownerId))
-			{
-				if (Configuration.ScoreRules.TryGetValue("KILL", out int ptsAttacker) &&
-					Configuration.ScoreRules.TryGetValue("DEAD", out int ptsVictim))
-				{
-					UpdatePlayerScore(victim.userID, "DEAD", $"being killed by {friendlyName} owned by {ownerName}", victim, info, attackerName: ownerName, entityName: friendlyName);
-					UpdatePlayerScore(ownerId, "KILL", $"eliminating {victim.displayName} with {friendlyName}", victim, info, attackerName: ownerName, entityName: friendlyName, reverseMessage: true);
-				}
-				return true;
-			}
+            if (ownerId != 0 && participants.Contains(ownerId))
+            {
+                if (Configuration.ScoreRules.TryGetValue("KILL", out int ptsAttacker) &&
+                    Configuration.ScoreRules.TryGetValue("DEAD", out int ptsVictim))
+                {
+                    UpdatePlayerScore(victim.userID, "DEAD", $"being killed by {friendlyName} owned by {ownerName}", victim, info, attackerName: ownerName, entityName: friendlyName);
+                    UpdatePlayerScore(ownerId, "KILL", $"eliminating {victim.displayName} with {friendlyName}", victim, info, attackerName: ownerName, entityName: friendlyName, reverseMessage: true);
+                }
+                return true;
+            }
 
-			if (Configuration.ScoreRules.TryGetValue("JOKE", out int jokePoints))
-			{
-				UpdatePlayerScore(victim.userID, "JOKE", $"death caused by an unowned {friendlyName}", victim, info, entityName: friendlyName);
-				return true;
-			}
+            if (Configuration.ScoreRules.TryGetValue("JOKE", out int jokePoints))
+            {
+                UpdatePlayerScore(victim.userID, "JOKE", $"death caused by an unowned {friendlyName}", victim, info, entityName: friendlyName);
+                return true;
+            }
 
-			return false;
-		}
+            return false;
+        }
 
-		private bool HandleNpcKilledByPlayer(BasePlayer victim, BasePlayer attacker, HitInfo info)
-		{
-			if (!victim.IsNpc || attacker == null || !participants.Contains(attacker.userID))
-				return false;
+        private bool HandleNpcKilledByPlayer(BasePlayer victim, BasePlayer attacker, HitInfo info)
+        {
+            if (!victim.IsNpc || attacker == null || !participants.Contains(attacker.userID))
+                return false;
 
-			if (Configuration.ScoreRules.TryGetValue("NPC", out int points))
-			{
-				string npcName = GetFriendlyNpcName(victim.ShortPrefabName);
-				UpdatePlayerScore(attacker.userID, "NPC", $"eliminating an NPC ({npcName})", victim, info, entityName: npcName);
-				return true;
-			}
+            if (Configuration.ScoreRules.TryGetValue("NPC", out int points))
+            {
+                string npcName = GetFriendlyNpcName(victim.ShortPrefabName);
+                UpdatePlayerScore(attacker.userID, "NPC", $"eliminating an NPC ({npcName})", victim, info, entityName: npcName);
+                return true;
+            }
 
-			return false;
-		}
+            return false;
+        }
 
-		private bool HandleNpcKilledByTrap(BasePlayer victim, BaseCombatEntity entity, HitInfo info)
-		{
-			if (!victim.IsNpc || entity == null) return false;
+        private bool HandleNpcKilledByTrap(BasePlayer victim, BaseCombatEntity entity, HitInfo info)
+        {
+            if (!victim.IsNpc || entity == null) return false;
 
-			ulong ownerId = entity.OwnerID;
-			if (ownerId == 0 || !participants.Contains(ownerId)) return false;
+            ulong ownerId = entity.OwnerID;
+            if (ownerId == 0 || !participants.Contains(ownerId)) return false;
 
-			string trapName = GetFriendlyTrapName(entity.ShortPrefabName ?? "Unknown");
-			string npcName = GetFriendlyNpcName(victim.ShortPrefabName ?? "Unknown");
-			string ownerName = GetPlayerName(ownerId);
+            string trapName = GetFriendlyTrapName(entity.ShortPrefabName ?? "Unknown");
+            string npcName = GetFriendlyNpcName(victim.ShortPrefabName ?? "Unknown");
+            string ownerName = GetPlayerName(ownerId);
 
-			if (Configuration.ScoreRules.TryGetValue("NPC", out int points))
-			{
-				UpdatePlayerScore(ownerId, "NPC", $"eliminating an NPC ({npcName}) with {trapName}", victim, info, attackerName: ownerName, entityName: npcName);
-				return true;
-			}
+            if (Configuration.ScoreRules.TryGetValue("NPC", out int points))
+            {
+                UpdatePlayerScore(ownerId, "NPC", $"eliminating an NPC ({npcName}) with {trapName}", victim, info, attackerName: ownerName, entityName: npcName);
+                return true;
+            }
 
-			return false;
-		}
+            return false;
+        }
 
-		private bool HandleSelfInflicted(BasePlayer victim, BasePlayer attacker, HitInfo info)
-		{
-			if (attacker != null && attacker != victim)
-				return false;
+        private bool HandleSelfInflicted(BasePlayer victim, BasePlayer attacker, HitInfo info)
+        {
+            if (attacker != null && attacker != victim)
+                return false;
 
-			if (!participants.Contains(victim.userID))
-				return false;
+            if (!participants.Contains(victim.userID))
+                return false;
 
-			string cause = info?.damageTypes?.GetMajorityDamageType().ToString() ?? "unknown cause";
+            string cause = info?.damageTypes?.GetMajorityDamageType().ToString() ?? "unknown cause";
 
-			if (Configuration.ScoreRules.TryGetValue("JOKE", out int points))
-			{
-				UpdatePlayerScore(victim.userID, "JOKE", $"self-inflicted death ({cause})", victim, info);
-				Puts($"[Debug] {victim.displayName} died from {cause} (self-inflicted).");
-				return true;
-			}
+            if (Configuration.ScoreRules.TryGetValue("JOKE", out int points))
+            {
+                UpdatePlayerScore(victim.userID, "JOKE", $"self-inflicted death ({cause})", victim, info);
+                Puts($"[Debug] {victim.displayName} died from {cause} (self-inflicted).");
+                return true;
+            }
 
-			return false;
-		}
+            return false;
+        }
     #endregion
-	#region OnEntityDeath
-		private void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
-		{
-			if (!isTournamentRunning || entity == null || string.IsNullOrEmpty(entity.ShortPrefabName))
-				return;
+    #region OnEntityDeath
+        private void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
+        {
+            if (!isTournamentRunning || entity == null || string.IsNullOrEmpty(entity.ShortPrefabName))
+                return;
 
-			if (HandleDeathByBradleyOrHelicopter(entity, info)) return;
-			if (HandleLongDistanceAnimalKill(entity, info)) return;
+            if (HandleDeathByBradleyOrHelicopter(entity, info)) return;
+            if (HandleLongDistanceAnimalKill(entity, info)) return;
 
-			Puts($"[Debug] ❌ No OnEntityDeath handler matched for entity: {entity.ShortPrefabName}");
-		}
-		
-		private bool HandleDeathByBradleyOrHelicopter(BaseCombatEntity entity, HitInfo info)
-		{
-			string prefabName = entity.ShortPrefabName.ToLowerInvariant();
+            Puts($"[Debug] ❌ No OnEntityDeath handler matched for entity: {entity.ShortPrefabName}");
+        }
+        
+        private bool HandleDeathByBradleyOrHelicopter(BaseCombatEntity entity, HitInfo info)
+        {
+            string prefabName = entity.ShortPrefabName.ToLowerInvariant();
 
-			if (!prefabName.Contains("helicopter") && !prefabName.Contains("bradley"))
-				return false;
+            if (!prefabName.Contains("helicopter") && !prefabName.Contains("bradley"))
+                return false;
 
-			var killer = info?.InitiatorPlayer;
-			if (killer == null || !participants.Contains(killer.userID))
-				return false;
+            var killer = info?.InitiatorPlayer;
+            if (killer == null || !participants.Contains(killer.userID))
+                return false;
 
-			if (!Configuration.ScoreRules.TryGetValue("ENT", out int points))
-				return false;
+            if (!Configuration.ScoreRules.TryGetValue("ENT", out int points))
+                return false;
 
-			string entityType = prefabName.Contains("helicopter") ? "Helicopter" : "Bradley";
+            string entityType = prefabName.Contains("helicopter") ? "Helicopter" : "Bradley";
 
-			UpdatePlayerScore(
-				killer.userID,
-				"ENT",
-				$"destroying a {entityType}",
-				null,
-				info,
-				entityName: entityType
-			);
+            UpdatePlayerScore(
+                killer.userID,
+                "ENT",
+                $"destroying a {entityType}",
+                null,
+                info,
+                entityName: entityType
+            );
 
-			Puts($"[Debug] {killer.displayName} earned {points} point(s) for downing a {entityType}.");
-			return true;
-		}
-		
-		private bool HandleLongDistanceAnimalKill(BaseCombatEntity entity, HitInfo info)
-		{
-			if (!IsAnimalKill(entity.ShortPrefabName))
-				return false;
+            Puts($"[Debug] {killer.displayName} earned {points} point(s) for downing a {entityType}.");
+            return true;
+        }
+        
+        private bool HandleLongDistanceAnimalKill(BaseCombatEntity entity, HitInfo info)
+        {
+            if (!IsAnimalKill(entity.ShortPrefabName))
+                return false;
 
-			var killer = info?.InitiatorPlayer;
-			if (killer == null || !participants.Contains(killer.userID))
-				return false;
+            var killer = info?.InitiatorPlayer;
+            if (killer == null || !participants.Contains(killer.userID))
+                return false;
 
-			float distance = Vector3.Distance(killer.transform.position, entity.transform.position);
-			if (distance <= Configuration.AnimalKillDistance)
-				return false;
+            float distance = Vector3.Distance(killer.transform.position, entity.transform.position);
+            if (distance <= Configuration.AnimalKillDistance)
+                return false;
 
-			if (!Configuration.ScoreRules.TryGetValue("WHY", out int points))
-				return false;
+            if (!Configuration.ScoreRules.TryGetValue("WHY", out int points))
+                return false;
 
-			string animalName = GetFriendlyAnimalName(entity.ShortPrefabName);
+            string animalName = GetFriendlyAnimalName(entity.ShortPrefabName);
 
-			UpdatePlayerScore(
-				killer.userID,
-				"WHY",
-				$"killing an animal ({animalName}) from {distance:F1} meters away",
-				null,
-				info,
-				entityName: animalName,
-				distance: distance
-			);
+            UpdatePlayerScore(
+                killer.userID,
+                "WHY",
+                $"killing an animal ({animalName}) from {distance:F1} meters away",
+                null,
+                info,
+                entityName: animalName,
+                distance: distance
+            );
 
-			Puts($"[Debug] Awarded {points} pt(s) to {killer.displayName} for {animalName} kill at {distance:F1} m");
-			return true;
-		}
-	#endregion
+            Puts($"[Debug] Awarded {points} pt(s) to {killer.displayName} for {animalName} kill at {distance:F1} m");
+            return true;
+        }
+    #endregion
     #region Score Handling
         private string GetPlayerName(ulong userId)
         {
@@ -2002,56 +2179,56 @@ namespace Oxide.Plugins
         private readonly object participantsDataLock = new object();
 
         private void SaveParticipantsData()
-		{
-			try
-			{
-				EnsureDataDirectory();
+        {
+            try
+            {
+                EnsureDataDirectory();
 
-				string serializedData;
-				lock (participantsDataLock)
-				{
-					serializedData = SerializeParticipantsData(participantsData);
-				}
+                string serializedData;
+                lock (participantsDataLock)
+                {
+                    serializedData = SerializeParticipantsData(participantsData);
+                }
 
-				Puts($"[Debug] Preparing to save Participants.json. Data:\n{serializedData}");
+                Puts($"[Debug] Preparing to save Participants.json. Data:\n{serializedData}");
 
-				if (File.Exists(ParticipantsFile))
-				{
-					try
-					{
-						using (FileStream fs = File.Open(ParticipantsFile, FileMode.Open, FileAccess.Read, FileShare.None))
-						{
-							Puts("[Debug] Participants.json is not in use. Proceeding with write.");
-						}
-					}
-					catch (IOException)
-					{
-						PrintWarning("[Warning] Participants.json is currently in use. Save operation skipped.");
-						return;
-					}
-				}
+                if (File.Exists(ParticipantsFile))
+                {
+                    try
+                    {
+                        using (FileStream fs = File.Open(ParticipantsFile, FileMode.Open, FileAccess.Read, FileShare.None))
+                        {
+                            Puts("[Debug] Participants.json is not in use. Proceeding with write.");
+                        }
+                    }
+                    catch (IOException)
+                    {
+                        PrintWarning("[Warning] Participants.json is currently in use. Save operation skipped.");
+                        return;
+                    }
+                }
 
-				lock (participantsDataLock)
-				{
-					File.WriteAllText(ParticipantsFile, serializedData);
-				}
+                lock (participantsDataLock)
+                {
+                    File.WriteAllText(ParticipantsFile, serializedData);
+                }
 
-				string savedData = File.ReadAllText(ParticipantsFile);
-				Puts($"[Debug] Successfully saved Participants.json. Contents:\n{savedData}");
-			}
-			catch (IOException ioEx)
-			{
-				PrintError($"IO error while saving participants data: {ioEx.Message}");
-			}
-			catch (JsonException jsonEx)
-			{
-				PrintError($"Serialization error while saving participants data: {jsonEx.Message}");
-			}
-			catch (Exception ex)
-			{
-				PrintError($"Unexpected error while saving participants data: {ex.Message}");
-			}
-		}
+                string savedData = File.ReadAllText(ParticipantsFile);
+                Puts($"[Debug] Successfully saved Participants.json. Contents:\n{savedData}");
+            }
+            catch (IOException ioEx)
+            {
+                PrintError($"IO error while saving participants data: {ioEx.Message}");
+            }
+            catch (JsonException jsonEx)
+            {
+                PrintError($"Serialization error while saving participants data: {jsonEx.Message}");
+            }
+            catch (Exception ex)
+            {
+                PrintError($"Unexpected error while saving participants data: {ex.Message}");
+            }
+        }
 
         private string SerializeParticipantsData(ConcurrentDictionary<ulong, PlayerStats> participants)
         {
@@ -2066,100 +2243,100 @@ namespace Oxide.Plugins
             }
         }
 
-		private void UpdatePlayerScore(ulong userId, string actionCode, string actionDescription, BasePlayer victim = null, HitInfo info = null, string attackerName = null, string entityName = "Unknown", bool reverseMessage = false, float? distance = null)
-		{
-			Puts($"[Debug] UpdatePlayerScore called for UserID={userId}, ActionCode={actionCode}, Victim={victim?.displayName ?? "None"}, Entity={entityName}");
+        private void UpdatePlayerScore(ulong userId, string actionCode, string actionDescription, BasePlayer victim = null, HitInfo info = null, string attackerName = null, string entityName = "Unknown", bool reverseMessage = false, float? distance = null)
+        {
+            Puts($"[Debug] UpdatePlayerScore called for UserID={userId}, ActionCode={actionCode}, Victim={victim?.displayName ?? "None"}, Entity={entityName}");
 
-			if (inactiveParticipants.Contains(userId))
-			{
-				Puts($"[Debug] Skipping score update: {userId} is inactive.");
-				return;
-			}
+            if (inactiveParticipants.Contains(userId))
+            {
+                Puts($"[Debug] Skipping score update: {userId} is inactive.");
+                return;
+            }
 
-			if (!participantsData.TryGetValue(userId, out var participant))
-			{
-				PrintWarning($"[Error] Player with UserID {userId} not found in participants. Current participants: {string.Join(", ", participantsData.Keys)}");
-				return;
-			}
+            if (!participantsData.TryGetValue(userId, out var participant))
+            {
+                PrintWarning($"[Error] Player with UserID {userId} not found in participants. Current participants: {string.Join(", ", participantsData.Keys)}");
+                return;
+            }
 
-			if (!Configuration.ScoreRules.TryGetValue(actionCode, out int points))
-			{
-				PrintWarning($"[Error] Invalid action code: {actionCode}. Available codes: {string.Join(", ", Configuration.ScoreRules.Keys)}");
-				return;
-			}
+            if (!Configuration.ScoreRules.TryGetValue(actionCode, out int points))
+            {
+                PrintWarning($"[Error] Invalid action code: {actionCode}. Available codes: {string.Join(", ", Configuration.ScoreRules.Keys)}");
+                return;
+            }
 
-			int previousScore = participant.Score;
-			participant.Score += points;
+            int previousScore = participant.Score;
+            participant.Score += points;
 
-			Puts($"[Debug] {participant.Name} (UserID: {userId}) | Previous Score: {previousScore} | Gained: {points} | New Score: {participant.Score}");
+            Puts($"[Debug] {participant.Name} (UserID: {userId}) | Previous Score: {previousScore} | Gained: {points} | New Score: {participant.Score}");
 
-			SaveParticipantsData();
+            SaveParticipantsData();
 
-			string savedData = File.ReadAllText(ParticipantsFile);
-			Puts($"[Debug] Participants.json after save: {savedData}");
+            string savedData = File.ReadAllText(ParticipantsFile);
+            Puts($"[Debug] Participants.json after save: {savedData}");
 
-			string pluralS = Math.Abs(points) == 1 ? "" : "s";
+            string pluralS = Math.Abs(points) == 1 ? "" : "s";
 
-			string templateKey = reverseMessage ? "KillPlayerWithEntity" : actionCode switch
-			{
-				"KILL" => "KillPlayerWithEntity",
-				"DEAD" => "KilledByPlayer",
-				"JOKE" => "SelfInflictedDeath",
-				"NPC" => "KillNPC",
-				"ENT" => "KillEntity",
-				"BRUH" => "DeathByBRUH",
-				"WHY" => "KillAnimal",
-				_ => "PlayerScoreUpdate"
-			};
+            string templateKey = reverseMessage ? "KillPlayerWithEntity" : actionCode switch
+            {
+                "KILL" => "KillPlayerWithEntity",
+                "DEAD" => "KilledByPlayer",
+                "JOKE" => "SelfInflictedDeath",
+                "NPC" => "KillNPC",
+                "ENT" => "KillEntity",
+                "BRUH" => "DeathByBRUH",
+                "WHY" => "KillAnimal",
+                _ => "PlayerScoreUpdate"
+            };
 
-			if (!Configuration.MessageTemplates.TryGetValue(templateKey, out string template))
-			{
-				PrintWarning($"[Error] Message template for action code '{actionCode}' not found. Using default.");
-				template = Configuration.MessageTemplates["PlayerScoreUpdate"];
-			}
+            if (!Configuration.MessageTemplates.TryGetValue(templateKey, out string template))
+            {
+                PrintWarning($"[Error] Message template for action code '{actionCode}' not found. Using default.");
+                template = Configuration.MessageTemplates["PlayerScoreUpdate"];
+            }
 
-			attackerName ??= GetPlayerName(userId);
+            attackerName ??= GetPlayerName(userId);
 
-			foreach (var generic in new[] { "an NPC", "an entity", "an animal" })
-			{
-				if (actionDescription.Contains(generic) && entityName != "Unknown")
-				{
-					actionDescription = actionDescription.Replace(generic, $"a {entityName}");
-					break;
-				}
-			}
+            foreach (var generic in new[] { "an NPC", "an entity", "an animal" })
+            {
+                if (actionDescription.Contains(generic) && entityName != "Unknown")
+                {
+                    actionDescription = actionDescription.Replace(generic, $"a {entityName}");
+                    break;
+                }
+            }
 
-			string articleEntityName = WithIndefiniteArticle(entityName);
+            string articleEntityName = WithIndefiniteArticle(entityName);
 
-			var placeholders = new Dictionary<string, string>
-			{
-				{ "PlayerName", GetPlayerName(userId) },
-				{ "VictimName", victim?.displayName ?? "Unknown" },
-				{ "AttackerName", attackerName },
-				{ "EntityName", entityName },
-				{ "ArticleEntityName", WithIndefiniteArticle(entityName) },
-				{ "AttackerType", WithIndefiniteArticle(entityName) },
-				{ "Score", points.ToString() },
-				{ "TotalScore", participant.Score.ToString() },
-				{ "Action", actionDescription },
-				{ "PluralS", pluralS }
-			};
+            var placeholders = new Dictionary<string, string>
+            {
+                { "PlayerName", GetPlayerName(userId) },
+                { "VictimName", victim?.displayName ?? "Unknown" },
+                { "AttackerName", attackerName },
+                { "EntityName", entityName },
+                { "ArticleEntityName", WithIndefiniteArticle(entityName) },
+                { "AttackerType", WithIndefiniteArticle(entityName) },
+                { "Score", points.ToString() },
+                { "TotalScore", participant.Score.ToString() },
+                { "Action", actionDescription },
+                { "PluralS", pluralS }
+            };
 
-			if (actionCode == "WHY")
-			{
-				placeholders["Distance"] = distance.HasValue ? distance.Value.ToString("F1") : Configuration.AnimalKillDistance.ToString();
-			}
+            if (actionCode == "WHY")
+            {
+                placeholders["Distance"] = distance.HasValue ? distance.Value.ToString("F1") : Configuration.AnimalKillDistance.ToString();
+            }
 
-			string globalMessage = FormatMessage(template, placeholders);
+            string globalMessage = FormatMessage(template, placeholders);
 
-			SendTournamentMessage(globalMessage);
-			if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-			{
-				SendDiscordMessage(globalMessage);
-			}
+            SendTournamentMessage(globalMessage);
+            if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
+            {
+                SendDiscordMessage(globalMessage);
+            }
 
-			LogEvent($"[Event] {participant.Name} received {points} point{pluralS} for {actionDescription}. New total score: {participant.Score}.");
-		}
+            LogEvent($"[Event] {participant.Name} received {points} point{pluralS} for {actionDescription}. New total score: {participant.Score}.");
+        }
 
         private string HistoryFile => $"{DataDirectory}/TournamentHistory.json";
 
@@ -2404,25 +2581,25 @@ namespace Oxide.Plugins
         }
 
         private void SendTournamentMessage(string message)
-		{
-			if (string.IsNullOrEmpty(message))
-			{
-				PrintWarning("[SendTournamentMessage] Attempted to send an empty or null message.");
-				return;
-			}
+        {
+            if (string.IsNullOrEmpty(message))
+            {
+                PrintWarning("[SendTournamentMessage] Attempted to send an empty or null message.");
+                return;
+            }
 
-			Puts($"[Debug] Sending tournament message: {message}");
+            Puts($"[Debug] Sending tournament message: {message}");
 
-			try
-			{
-				string formattedMessage = Configuration.ChatFormat.Replace("{message}", message);
-				Server.Broadcast(formattedMessage, ulong.Parse(Configuration.ChatIconSteamId));
-			}
-			catch (Exception ex)
-			{
-				PrintError($"[SendTournamentMessage] Error sending message to all players: {ex.Message}");
-			}
-		}
+            try
+            {
+                string formattedMessage = Configuration.ChatFormat.Replace("{message}", message);
+                Server.Broadcast(formattedMessage, ulong.Parse(Configuration.ChatIconSteamId));
+            }
+            catch (Exception ex)
+            {
+                PrintError($"[SendTournamentMessage] Error sending message to all players: {ex.Message}");
+            }
+        }
 
         private void SendDiscordMessage(string content)
         {
@@ -2456,89 +2633,89 @@ namespace Oxide.Plugins
             }
         }
     #endregion
-	#region Kit Economy Integration
+    #region Kit Economy Integration
     [PluginReference]
     private Plugin Kits;
-	private Plugin Clans;
+    private Plugin Clans;
 
-	private void NormaliseKitPrices()
-	{
-		Configuration.KitPrices = new Dictionary<string, int>(
-			Configuration.KitPrices, StringComparer.OrdinalIgnoreCase);
-	}
-	
-		[HookMethod("OnKitRedeemed")]
-		private void OnKitRedeemed(BasePlayer player, string kitName)
-		{
-			if (player == null || string.IsNullOrWhiteSpace(kitName)) return;
-			kitName = kitName.Trim();
+    private void NormaliseKitPrices()
+    {
+        Configuration.KitPrices = new Dictionary<string, int>(
+            Configuration.KitPrices, StringComparer.OrdinalIgnoreCase);
+    }
+    
+        [HookMethod("OnKitRedeemed")]
+        private void OnKitRedeemed(BasePlayer player, string kitName)
+        {
+            if (player == null || string.IsNullOrWhiteSpace(kitName)) return;
+            kitName = kitName.Trim();
 
-			if (!Configuration.KitPrices.TryGetValue(kitName, out int kitPrice))
-			{
-				PrintWarning($"[KitsEconomy] No price defined for kit: {kitName}");
-				return;
-			}
+            if (!Configuration.KitPrices.TryGetValue(kitName, out int kitPrice))
+            {
+                PrintWarning($"[KitsEconomy] No price defined for kit: {kitName}");
+                return;
+            }
 
-			if (!participantsData.TryGetValue(player.userID, out var participant))
-				return;
+            if (!participantsData.TryGetValue(player.userID, out var participant))
+                return;
 
-			bool pointsDeducted = false;
-			lock (participantsDataLock)
-			{
-				if (participant.Score >= kitPrice)
-				{
-					participant.Score -= kitPrice;
-					pointsDeducted = true;
-				}
-			}
+            bool pointsDeducted = false;
+            lock (participantsDataLock)
+            {
+                if (participant.Score >= kitPrice)
+                {
+                    participant.Score -= kitPrice;
+                    pointsDeducted = true;
+                }
+            }
 
-			if (!pointsDeducted)
-			{
-				lock (participantsDataLock)
-				{
-					participant.Score -= kitPrice;
-				}
-				SaveParticipantsData();
+            if (!pointsDeducted)
+            {
+                lock (participantsDataLock)
+                {
+                    participant.Score -= kitPrice;
+                }
+                SaveParticipantsData();
 
-				PrintWarning($"[RustRoyale] {player.displayName} received kit '{kitName}' without sufficient points. Score forced to {participant.Score}.");
-				LogEvent($"{player.displayName} forced into negative score ({participant.Score}) after kit '{kitName}' could not be fully charged.");
+                PrintWarning($"[RustRoyale] {player.displayName} received kit '{kitName}' without sufficient points. Score forced to {participant.Score}.");
+                LogEvent($"{player.displayName} forced into negative score ({participant.Score}) after kit '{kitName}' could not be fully charged.");
 
-				var debtMsg = FormatMessage(
-					Configuration.MessageTemplates["KitPurchaseSuccess"],
-					new Dictionary<string,string>
-					{
-						["PlayerName"]  = player.displayName,
-						["KitName"]     = kitName,
-						["Price"]       = kitPrice.ToString(),
-						["TotalPoints"] = participant.Score.ToString()
-					}
-				);
-				SendTournamentMessage(debtMsg);
-				if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-					SendDiscordMessage(debtMsg);
+                var debtMsg = FormatMessage(
+                    Configuration.MessageTemplates["KitPurchaseSuccess"],
+                    new Dictionary<string,string>
+                    {
+                        ["PlayerName"]  = player.displayName,
+                        ["KitName"]     = kitName,
+                        ["Price"]       = kitPrice.ToString(),
+                        ["TotalPoints"] = participant.Score.ToString()
+                    }
+                );
+                SendTournamentMessage(debtMsg);
+                if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
+                    SendDiscordMessage(debtMsg);
 
-				return;
-			}
+                return;
+            }
 
-			SaveParticipantsData();
+            SaveParticipantsData();
 
-			var successMsg = FormatMessage(
-				Configuration.MessageTemplates["KitPurchaseSuccess"],
-				new Dictionary<string,string>
-				{
-					["PlayerName"]  = player.displayName,
-					["KitName"]     = kitName,
-					["Price"]       = kitPrice.ToString(),
-					["TotalPoints"] = participant.Score.ToString()
-				}
-			);
-			SendTournamentMessage(successMsg);
-			if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-				SendDiscordMessage(successMsg);
+            var successMsg = FormatMessage(
+                Configuration.MessageTemplates["KitPurchaseSuccess"],
+                new Dictionary<string,string>
+                {
+                    ["PlayerName"]  = player.displayName,
+                    ["KitName"]     = kitName,
+                    ["Price"]       = kitPrice.ToString(),
+                    ["TotalPoints"] = participant.Score.ToString()
+                }
+            );
+            SendTournamentMessage(successMsg);
+            if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
+                SendDiscordMessage(successMsg);
 
-			LogEvent($"{participant.Name} purchased kit '{kitName}' for {kitPrice} points. New Score: {participant.Score}");
-		}
-	#endregion
+            LogEvent($"{participant.Name} purchased kit '{kitName}' for {kitPrice} points. New Score: {participant.Score}");
+        }
+    #endregion
     #region Commands
         [ChatCommand("time_tournament")]
         private void TimeTournamentCommand(BasePlayer player, string command, string[] args)
@@ -2567,150 +2744,150 @@ namespace Oxide.Plugins
         }
 
         [ChatCommand("enter_tournament")]
-		private void EnterTournamentCommand(BasePlayer player, string command, string[] args)
-		{
-			if (participantsData.TryGetValue(player.userID, out var existingParticipant))
-			{
-				if (inactiveParticipants.Contains(player.userID))
-				{
-					inactiveParticipants.Remove(player.userID);
+        private void EnterTournamentCommand(BasePlayer player, string command, string[] args)
+        {
+            if (participantsData.TryGetValue(player.userID, out var existingParticipant))
+            {
+                if (inactiveParticipants.Contains(player.userID))
+                {
+                    inactiveParticipants.Remove(player.userID);
 
-					string message = $"{player.displayName}, you have rejoined the tournament! Your previous score has been restored.";
-					SendPlayerMessage(player, message);
-					LogEvent($"{player.displayName} rejoined the tournament with existing score: {existingParticipant.Score}.");
-				}
-				else
-				{
-					string message = Configuration.MessageTemplates.TryGetValue("AlreadyParticipating", out var alreadyTemplate)
-						? FormatMessage(alreadyTemplate, new Dictionary<string, string>
-						{
-							{ "PlayerName", player.displayName }
-						})
-						: $"{player.displayName}, you are already in the tournament.";
-					SendPlayerMessage(player, message);
-				}
-			}
-			else
-			{
-				var newParticipant = new PlayerStats(player.userID) { Name = player.displayName };
-				participantsData[player.userID] = newParticipant;
-				SaveParticipantsData();
+                    string message = $"{player.displayName}, you have rejoined the tournament! Your previous score has been restored.";
+                    SendPlayerMessage(player, message);
+                    LogEvent($"{player.displayName} rejoined the tournament with existing score: {existingParticipant.Score}.");
+                }
+                else
+                {
+                    string message = Configuration.MessageTemplates.TryGetValue("AlreadyParticipating", out var alreadyTemplate)
+                        ? FormatMessage(alreadyTemplate, new Dictionary<string, string>
+                        {
+                            { "PlayerName", player.displayName }
+                        })
+                        : $"{player.displayName}, you are already in the tournament.";
+                    SendPlayerMessage(player, message);
+                }
+            }
+            else
+            {
+                var newParticipant = new PlayerStats(player.userID) { Name = player.displayName };
+                participantsData[player.userID] = newParticipant;
+                SaveParticipantsData();
 
-				string message = Configuration.MessageTemplates.TryGetValue("JoinTournament", out var joinTemplate)
-					? FormatMessage(joinTemplate, new Dictionary<string, string>
-					{
-						{ "PlayerName", player.displayName }
-					})
-					: $"{player.displayName} has joined the tournament.";
-				
-				SendTournamentMessage(message);
-				
-				if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-				{
-					SendDiscordMessage(message);
-				}
+                string message = Configuration.MessageTemplates.TryGetValue("JoinTournament", out var joinTemplate)
+                    ? FormatMessage(joinTemplate, new Dictionary<string, string>
+                    {
+                        { "PlayerName", player.displayName }
+                    })
+                    : $"{player.displayName} has joined the tournament.";
+                
+                SendTournamentMessage(message);
+                
+                if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
+                {
+                    SendDiscordMessage(message);
+                }
 
-				LogEvent($"{player.displayName} joined the tournament as a new participant.");
-			}
+                LogEvent($"{player.displayName} joined the tournament as a new participant.");
+            }
 
-			participants.Add(player.userID);
-		}
+            participants.Add(player.userID);
+        }
 
         [ChatCommand("exit_tournament")]
-		private void ExitTournamentCommand(BasePlayer player, string command, string[] args)
-		{
-			if (!participantsData.TryGetValue(player.userID, out var participant))
-			{
-				string message = Configuration.MessageTemplates.TryGetValue("NotInTournament", out var notInTemplate)
-					? FormatMessage(notInTemplate, new Dictionary<string, string>
-					{
-						{ "PlayerName", player.displayName }
-					})
-					: $"{player.displayName}, you are not part of the tournament.";
-				SendPlayerMessage(player, message);
-				return;
-			}
+        private void ExitTournamentCommand(BasePlayer player, string command, string[] args)
+        {
+            if (!participantsData.TryGetValue(player.userID, out var participant))
+            {
+                string message = Configuration.MessageTemplates.TryGetValue("NotInTournament", out var notInTemplate)
+                    ? FormatMessage(notInTemplate, new Dictionary<string, string>
+                    {
+                        { "PlayerName", player.displayName }
+                    })
+                    : $"{player.displayName}, you are not part of the tournament.";
+                SendPlayerMessage(player, message);
+                return;
+            }
 
-			inactiveParticipants.Add(player.userID);
-			participants.Remove(player.userID);
+            inactiveParticipants.Add(player.userID);
+            participants.Remove(player.userID);
 
-			int previousScore = participant.Score;
+            int previousScore = participant.Score;
 
-			string leaveMessage;
+            string leaveMessage;
 
-			if (Configuration.PenaltyOnExitEnabled)
-			{
-				int penaltyAmount = Configuration.PenaltyPointsOnExit;
-				participant.Score -= penaltyAmount;
+            if (Configuration.PenaltyOnExitEnabled)
+            {
+                int penaltyAmount = Configuration.PenaltyPointsOnExit;
+                participant.Score -= penaltyAmount;
 
-				Puts($"[Debug] {player.displayName} was penalized {penaltyAmount} points for exiting. Previous Score: {previousScore}, New Score: {participant.Score}");
-				LogEvent($"{player.displayName} left the tournament and was penalized {penaltyAmount} points (from {previousScore} to {participant.Score}).");
+                Puts($"[Debug] {player.displayName} was penalized {penaltyAmount} points for exiting. Previous Score: {previousScore}, New Score: {participant.Score}");
+                LogEvent($"{player.displayName} left the tournament and was penalized {penaltyAmount} points (from {previousScore} to {participant.Score}).");
 
-				leaveMessage = Configuration.MessageTemplates.TryGetValue("LeaveTournamentPenalty", out var penaltyTemplate)
-					? FormatMessage(penaltyTemplate, new Dictionary<string, string>
-					{
-						{ "PlayerName", player.displayName },
-						{ "PenaltyPoints", penaltyAmount.ToString() }
-					})
-					: $"{player.displayName} left the tournament and lost {penaltyAmount} points!";
-			}
-			else
-			{
-				LogEvent($"{player.displayName} left the tournament (no penalty applied).");
+                leaveMessage = Configuration.MessageTemplates.TryGetValue("LeaveTournamentPenalty", out var penaltyTemplate)
+                    ? FormatMessage(penaltyTemplate, new Dictionary<string, string>
+                    {
+                        { "PlayerName", player.displayName },
+                        { "PenaltyPoints", penaltyAmount.ToString() }
+                    })
+                    : $"{player.displayName} left the tournament and lost {penaltyAmount} points!";
+            }
+            else
+            {
+                LogEvent($"{player.displayName} left the tournament (no penalty applied).");
 
-				leaveMessage = Configuration.MessageTemplates.TryGetValue("LeaveTournament", out var leaveTemplate)
-					? FormatMessage(leaveTemplate, new Dictionary<string, string>
-					{
-						{ "PlayerName", player.displayName }
-					})
-					: $"{player.displayName} has left the tournament.";
-			}
+                leaveMessage = Configuration.MessageTemplates.TryGetValue("LeaveTournament", out var leaveTemplate)
+                    ? FormatMessage(leaveTemplate, new Dictionary<string, string>
+                    {
+                        { "PlayerName", player.displayName }
+                    })
+                    : $"{player.displayName} has left the tournament.";
+            }
 
-			SaveParticipantsData();
+            SaveParticipantsData();
 
-			SendPlayerMessage(player, leaveMessage);
-		}
+            SendPlayerMessage(player, leaveMessage);
+        }
 
         [ChatCommand("open_tournament")]
-		private void OpenTournamentCommand(BasePlayer player, string command, string[] args)
-		{
-			if (participantsData.TryGetValue(player.userID, out var existingParticipant))
-			{
-				if (inactiveParticipants.Remove(player.userID))
-				{
-					Puts($"[Debug] {player.displayName} ({player.userID}) re‑enabled from inactive list.");
-					SaveParticipantsData();
+        private void OpenTournamentCommand(BasePlayer player, string command, string[] args)
+        {
+            if (participantsData.TryGetValue(player.userID, out var existingParticipant))
+            {
+                if (inactiveParticipants.Remove(player.userID))
+                {
+                    Puts($"[Debug] {player.displayName} ({player.userID}) re‑enabled from inactive list.");
+                    SaveParticipantsData();
 
-					string reactivateMsg = $"{player.displayName}, you’ve re‑joined the tournament. Welcome back!";
-					SendPlayerMessage(player, reactivateMsg);
-					LogEvent($"{player.displayName} reactivated entry in the tournament.");
-				}
-				else
-				{
-					Puts($"[Debug] {player.displayName} ({player.userID}) attempted to opt‑in but is already active.");
-					string alreadyMsg = Configuration.MessageTemplates.TryGetValue("AlreadyOptedIn", out var tmp)
-						? FormatMessage(tmp, new Dictionary<string,string>{{"PlayerName", player.displayName}})
-						: $"{player.displayName}, you are already opted into the tournament.";
-					SendPlayerMessage(player, alreadyMsg);
-				}
-				return;
-			}
+                    string reactivateMsg = $"{player.displayName}, you’ve re‑joined the tournament. Welcome back!";
+                    SendPlayerMessage(player, reactivateMsg);
+                    LogEvent($"{player.displayName} reactivated entry in the tournament.");
+                }
+                else
+                {
+                    Puts($"[Debug] {player.displayName} ({player.userID}) attempted to opt‑in but is already active.");
+                    string alreadyMsg = Configuration.MessageTemplates.TryGetValue("AlreadyOptedIn", out var tmp)
+                        ? FormatMessage(tmp, new Dictionary<string,string>{{"PlayerName", player.displayName}})
+                        : $"{player.displayName}, you are already opted into the tournament.";
+                    SendPlayerMessage(player, alreadyMsg);
+                }
+                return;
+            }
 
-			var newParticipant = new PlayerStats(player.userID) { Name = player.displayName };
-			participantsData[player.userID] = newParticipant;
-			inactiveParticipants.Remove(player.userID);
-			openTournamentPlayers.Add(player.userID);
+            var newParticipant = new PlayerStats(player.userID) { Name = player.displayName };
+            participantsData[player.userID] = newParticipant;
+            inactiveParticipants.Remove(player.userID);
+            openTournamentPlayers.Add(player.userID);
 
-			Puts($"[Debug] {player.displayName} ({player.userID}) added to participantsData and openTournamentPlayers.");
-			SaveParticipantsData();
+            Puts($"[Debug] {player.displayName} ({player.userID}) added to participantsData and openTournamentPlayers.");
+            SaveParticipantsData();
 
-			string successMsg = Configuration.MessageTemplates.TryGetValue("JoinTournament", out var joinTpl)
-				? FormatMessage(joinTpl, new Dictionary<string,string>{{"PlayerName", player.displayName}})
-				: $"{player.displayName} has successfully opted into the tournament.";
-			SendPlayerMessage(player, successMsg);
+            string successMsg = Configuration.MessageTemplates.TryGetValue("JoinTournament", out var joinTpl)
+                ? FormatMessage(joinTpl, new Dictionary<string,string>{{"PlayerName", player.displayName}})
+                : $"{player.displayName} has successfully opted into the tournament.";
+            SendPlayerMessage(player, successMsg);
 
-			LogEvent($"{player.displayName} opted into the tournament.");
-		}
+            LogEvent($"{player.displayName} opted into the tournament.");
+        }
 
         [ChatCommand("close_tournament")]
         private void CloseTournamentCommand(BasePlayer player, string command, string[] args)
@@ -2718,7 +2895,7 @@ namespace Oxide.Plugins
             if (participantsData.ContainsKey(player.userID))
             {
                 inactiveParticipants.Add(player.userID);
-				autoEnrollBlacklist.Add(player.userID);
+                autoEnrollBlacklist.Add(player.userID);
                 SaveAutoEnrollBlacklist();
                 SaveParticipantsData();
 
@@ -2784,107 +2961,107 @@ namespace Oxide.Plugins
         }
 
         [ChatCommand("score_tournament")]
-		private void ScoreTournamentCommand(BasePlayer player, string command, string[] args)
-		{
-			Puts($"[Debug] Player {player.displayName} ({player.UserIDString}) issued the /score_tournament command.");
+        private void ScoreTournamentCommand(BasePlayer player, string command, string[] args)
+        {
+            Puts($"[Debug] Player {player.displayName} ({player.UserIDString}) issued the /score_tournament command.");
 
-			try
-			{
-				DisplayScoresAndClans(player);
-			}
-			catch (Exception ex)
-			{
-				PrintError($"[Error] Failed to display scores: {ex.Message}");
-				SendPlayerMessage(player, "An error occurred while fetching scores. Please try again later.");
-			}
-		}
-		
-		private void LoadTeamLeaderNames()
-		{
-			if (File.Exists(TeamLeadersFile))
-			{
-				teamLeaderNames = JsonConvert.DeserializeObject<Dictionary<ulong, string>>(File.ReadAllText(TeamLeadersFile)) ?? new();
-			}
-		}
+            try
+            {
+                DisplayScoresAndClans(player);
+            }
+            catch (Exception ex)
+            {
+                PrintError($"[Error] Failed to display scores: {ex.Message}");
+                SendPlayerMessage(player, "An error occurred while fetching scores. Please try again later.");
+            }
+        }
+        
+        private void LoadTeamLeaderNames()
+        {
+            if (File.Exists(TeamLeadersFile))
+            {
+                teamLeaderNames = JsonConvert.DeserializeObject<Dictionary<ulong, string>>(File.ReadAllText(TeamLeadersFile)) ?? new();
+            }
+        }
 
-		private void SaveTeamLeaderNames()
-		{
-			File.WriteAllText(TeamLeadersFile, JsonConvert.SerializeObject(teamLeaderNames, Formatting.Indented));
-		}
+        private void SaveTeamLeaderNames()
+        {
+            File.WriteAllText(TeamLeadersFile, JsonConvert.SerializeObject(teamLeaderNames, Formatting.Indented));
+        }
 
-		private void DisplayScoresAndClans(BasePlayer player)
-		{
-			if (!participantsData.Any())
-			{
-				Puts("[Debug] No participants found to display scores.");
-				SendPlayerMessage(player, "No scores are available at the moment. Join the tournament to compete!");
-				return;
-			}
+        private void DisplayScoresAndClans(BasePlayer player)
+        {
+            if (!participantsData.Any())
+            {
+                Puts("[Debug] No participants found to display scores.");
+                SendPlayerMessage(player, "No scores are available at the moment. Join the tournament to compete!");
+                return;
+            }
 
-			var sortedPlayers = participantsData.Values
-				.OrderByDescending(p => p.Score)
-				.ToList();
-			var topPlayers = sortedPlayers.Take(Configuration.TopPlayersToTrack).ToList();
+            var sortedPlayers = participantsData.Values
+                .OrderByDescending(p => p.Score)
+                .ToList();
+            var topPlayers = sortedPlayers.Take(Configuration.TopPlayersToTrack).ToList();
 
-			var clanTotals = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-			var groupNames = new Dictionary<string, string>();
+            var clanTotals = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var groupNames = new Dictionary<string, string>();
 
-			foreach (var ps in participantsData.Values)
-			{
-				string groupKey = GetGroupKey(ps.UserId);
+            foreach (var ps in participantsData.Values)
+            {
+                string groupKey = GetGroupKey(ps.UserId);
 
-				if (string.IsNullOrEmpty(groupKey) ||
-					groupKey.Equals("default", StringComparison.OrdinalIgnoreCase) ||
-					groupKey.Equals("No Group", StringComparison.OrdinalIgnoreCase))
-					continue;
+                if (string.IsNullOrEmpty(groupKey) ||
+                    groupKey.Equals("default", StringComparison.OrdinalIgnoreCase) ||
+                    groupKey.Equals("No Group", StringComparison.OrdinalIgnoreCase))
+                    continue;
 
-				string displayName = groupKey;
+                string displayName = groupKey;
 
-				if (ulong.TryParse(groupKey, out ulong teamId) &&
-					RelationshipManager.ServerInstance.teams.ContainsKey(teamId))
-				{
-					if (teamLeaderNames.TryGetValue(teamId, out var cachedName))
-						{
-							displayName = $"{cachedName}'s team";
-						}
-						else
-						{
-							displayName = $"Team {teamId}";
-						}
-				}
+                if (ulong.TryParse(groupKey, out ulong teamId) &&
+                    RelationshipManager.ServerInstance.teams.ContainsKey(teamId))
+                {
+                    if (teamLeaderNames.TryGetValue(teamId, out var cachedName))
+                        {
+                            displayName = $"{cachedName}'s team";
+                        }
+                        else
+                        {
+                            displayName = $"Team {teamId}";
+                        }
+                }
 
-				groupNames[groupKey] = displayName;
+                groupNames[groupKey] = displayName;
 
-				if (!clanTotals.ContainsKey(groupKey))
-					clanTotals[groupKey] = 0;
+                if (!clanTotals.ContainsKey(groupKey))
+                    clanTotals[groupKey] = 0;
 
-				clanTotals[groupKey] += ps.Score;
-			}
+                clanTotals[groupKey] += ps.Score;
+            }
 
-			var topClans = clanTotals
-				.OrderByDescending(kv => kv.Value)
-				.Take(Configuration.TopClansToTrack)
-				.ToList();
+            var topClans = clanTotals
+                .OrderByDescending(kv => kv.Value)
+                .Take(Configuration.TopClansToTrack)
+                .ToList();
 
-			var sb = new StringBuilder();
-			sb.AppendLine("Top Players:");
-			for (int i = 0; i < topPlayers.Count; i++)
-				sb.AppendLine($"{i + 1}. {topPlayers[i].Name} ({topPlayers[i].Score} pts)");
+            var sb = new StringBuilder();
+            sb.AppendLine("Top Players:");
+            for (int i = 0; i < topPlayers.Count; i++)
+                sb.AppendLine($"{i + 1}. {topPlayers[i].Name} ({topPlayers[i].Score} pts)");
 
-			if (topClans.Count > 0)
-			{
-				sb.AppendLine();
-				sb.AppendLine("Top Clans/Groups:");
-				for (int i = 0; i < topClans.Count; i++)
-				{
-					string displayName = groupNames.ContainsKey(topClans[i].Key) ? groupNames[topClans[i].Key] : topClans[i].Key;
-					sb.AppendLine($"{i + 1}. {displayName} ({topClans[i].Value} pts)");
-				}
-			}
+            if (topClans.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("Top Clans/Groups:");
+                for (int i = 0; i < topClans.Count; i++)
+                {
+                    string displayName = groupNames.ContainsKey(topClans[i].Key) ? groupNames[topClans[i].Key] : topClans[i].Key;
+                    sb.AppendLine($"{i + 1}. {displayName} ({topClans[i].Value} pts)");
+                }
+            }
 
-			SendPlayerMessage(player, sb.ToString().TrimEnd());
-			Puts($"[Debug] Displayed top {Configuration.TopPlayersToTrack} players and top {Configuration.TopClansToTrack} clans for {player.displayName}");
-		}
+            SendPlayerMessage(player, sb.ToString().TrimEnd());
+            Puts($"[Debug] Displayed top {Configuration.TopPlayersToTrack} players and top {Configuration.TopClansToTrack} clans for {player.displayName}");
+        }
 
         private bool HasAdminPermission(BasePlayer player)
         {
@@ -2987,82 +3164,82 @@ namespace Oxide.Plugins
                 }
             }
         }
-		
-		[ChatCommand("end_tournament")]
-		private void EndTournamentCommand(BasePlayer player, string command, string[] args)
-		{
-			if (!ValidateAdminCommand(player, "end the tournament"))
-			{
-				return;
-			}
+        
+        [ChatCommand("end_tournament")]
+        private void EndTournamentCommand(BasePlayer player, string command, string[] args)
+        {
+            if (!ValidateAdminCommand(player, "end the tournament"))
+            {
+                return;
+            }
 
-			if (!isTournamentRunning)
-			{
-				SendPlayerMessage(player, "No tournament is currently running.");
-				return;
-			}
+            if (!isTournamentRunning)
+            {
+                SendPlayerMessage(player, "No tournament is currently running.");
+                return;
+            }
 
-			EndTournament();
+            EndTournament();
 
-			SendPlayerMessage(player, "Tournament has been ended manually.");
-			Puts($"[Debug] Tournament manually ended by {player.displayName} ({player.UserIDString}).");
-		}
+            SendPlayerMessage(player, "Tournament has been ended manually.");
+            Puts($"[Debug] Tournament manually ended by {player.displayName} ({player.UserIDString}).");
+        }
 
         [ChatCommand("show_rules")]
-		private void ShowRulesCommand(BasePlayer player, string command, string[] args)
-		{
-			var sb = new StringBuilder();
-			sb.AppendLine("Tournament Scoring Rules:");
+        private void ShowRulesCommand(BasePlayer player, string command, string[] args)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("Tournament Scoring Rules:");
 
-			foreach (var kvp in Configuration.ScoreRules)
-			{
-				string line = kvp.Key switch
-				{
-					"KILL" => $"• Player kill: +{kvp.Value} points",
-					"DEAD" => $"• Death by another player: {kvp.Value} points",
-					"JOKE" => $"• Self-inflicted or trap death: {kvp.Value} points",
-					"NPC"  => $"• NPC kill: +{kvp.Value} points",
-					"ENT"  => $"• Helicopter/Bradley kill: +{kvp.Value} points",
-					"BRUH" => $"• Death by NPC/vehicle: {kvp.Value} points",
-					"WHY"  => $"• Animal long-range kill (> {Configuration.AnimalKillDistance}m): +{kvp.Value} points",
-					_      => $"• {kvp.Key}: {kvp.Value} points"
-				};
-				sb.AppendLine(line);
-			}
+            foreach (var kvp in Configuration.ScoreRules)
+            {
+                string line = kvp.Key switch
+                {
+                    "KILL" => $"• Player kill: +{kvp.Value} points",
+                    "DEAD" => $"• Death by another player: {kvp.Value} points",
+                    "JOKE" => $"• Self-inflicted or trap death: {kvp.Value} points",
+                    "NPC"  => $"• NPC kill: +{kvp.Value} points",
+                    "ENT"  => $"• Helicopter/Bradley kill: +{kvp.Value} points",
+                    "BRUH" => $"• Death by NPC/vehicle: {kvp.Value} points",
+                    "WHY"  => $"• Animal long-range kill (> {Configuration.AnimalKillDistance}m): +{kvp.Value} points",
+                    _      => $"• {kvp.Key}: {kvp.Value} points"
+                };
+                sb.AppendLine(line);
+            }
 
-			sb.AppendLine("\n Kit Prices:");
-			foreach (var kit in Configuration.KitPrices)
-				sb.AppendLine($"• {kit.Key}: {kit.Value} points");
+            sb.AppendLine("\n Kit Prices:");
+            foreach (var kit in Configuration.KitPrices)
+                sb.AppendLine($"• {kit.Key}: {kit.Value} points");
 
-			SendPlayerMessage(player, sb.ToString());
-		}
-		
-		[ChatCommand("config_tournament")]
-		private void ConfigTournamentCommand(BasePlayer player, string cmd, string[] args)
-		{
-			if (!ValidateAdminCommand(player, "open config")) return;
-			ShowConfigUI(player);
-		}
+            SendPlayerMessage(player, sb.ToString());
+        }
+        
+        [ChatCommand("config_tournament")]
+        private void ConfigTournamentCommand(BasePlayer player, string cmd, string[] args)
+        {
+            if (!ValidateAdminCommand(player, "open config")) return;
+            ShowConfigUI(player);
+        }
 
         [ChatCommand("help_tournament")]
         private void HelpTournamentCommand(BasePlayer player, string command, string[] args)
         {
             var commandDescriptions = new Dictionary<string, string>
-			{
-				{ "start_tournament", "Start the tournament now (Admin only)." },
-				{ "end_tournament", "End the running tournament early (Admin only)." },
-				{ "reload_config", "Reload the tournament config (Admin only)." },
-				{ "config_tournament", "Open the configuration UI (Admin only)." },
-				{ "enter_tournament", "Join the tournament and compete." },
-				{ "exit_tournament", "Leave the tournament (may lose points)." },
-				{ "open_tournament", "Opt-in to the tournament manually." },
-				{ "close_tournament", "Opt-out and disable auto-enroll." },
-				{ "time_tournament", "Check time remaining in current tournament." },
-				{ "status_tournament", "Get current tournament status and top player." },
-				{ "score_tournament", "View the leaderboard and top clans." },
-				{ "show_rules", "See the scoring rules and kit prices." },
-				{ "help_tournament", "Show this list of commands." }
-			};
+            {
+                { "start_tournament", "Start the tournament now (Admin only)." },
+                { "end_tournament", "End the running tournament early (Admin only)." },
+                { "reload_config", "Reload the tournament config (Admin only)." },
+                { "config_tournament", "Open the configuration UI (Admin only)." },
+                { "enter_tournament", "Join the tournament and compete." },
+                { "exit_tournament", "Leave the tournament (may lose points)." },
+                { "open_tournament", "Opt-in to the tournament manually." },
+                { "close_tournament", "Opt-out and disable auto-enroll." },
+                { "time_tournament", "Check time remaining in current tournament." },
+                { "status_tournament", "Get current tournament status and top player." },
+                { "score_tournament", "View the leaderboard and top clans." },
+                { "show_rules", "See the scoring rules and kit prices." },
+                { "help_tournament", "Show this list of commands." }
+            };
 
             var restrictedCommands = new HashSet<string>
             {
