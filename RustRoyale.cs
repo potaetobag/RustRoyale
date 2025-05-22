@@ -16,11 +16,13 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.2.4"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.2.5"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
         private const string ConfigUiPanelName = "RustRoyale_Config_UI";
         private readonly Dictionary<string, string> pendingConfig = new Dictionary<string, string>();
+        private readonly Dictionary<ulong, int> npcKillCounts = new();
+        private readonly Dictionary<ulong, int> animalKillCounts = new();
         private HashSet<ulong> welcomeOptOut = new HashSet<ulong>();
         private string WelcomeOptOutFile => $"{DataDirectory}/WelcomeOptOut.json";
         private Dictionary<ulong, string> teamLeaderNames = new();
@@ -55,6 +57,8 @@ namespace Oxide.Plugins
             public int TopPlayersToTrack { get; set; } = 3;
             public int TopClansToTrack { get; set; } = 3;
             public int JoinCutoffHours { get; set; } = 0; // 0 = No late‑join cut‑off
+            public int NpcKillCap { get; set; } = 0;
+            public int AnimalKillCap { get; set; } = 0;
             public List<int> NotificationIntervals { get; set; } = new List<int> { 600, 60 }; // Default: every 10 minutes (600 seconds) and last minute (60 seconds)
             public Dictionary<string, int> ScoreRules { get; set; } = new Dictionary<string, int>
             {
@@ -160,6 +164,8 @@ namespace Oxide.Plugins
             SetDefault(() => Configuration.StartMinute, v => Configuration.StartMinute = v, 0, "StartMinute", v => v < 0 || v > 59);
             SetDefault(() => Configuration.DataRetentionDays, v => Configuration.DataRetentionDays = v, 30, "DataRetentionDays", v => v <= 0);
             SetDefault(() => Configuration.TopPlayersToTrack, v => Configuration.TopPlayersToTrack = v, 3, "TopPlayersToTrack", v => v <= 0);
+            SetDefault(() => Configuration.NpcKillCap, v => Configuration.NpcKillCap = v, 0, "NpcKillCap", v => v < 0);
+            SetDefault(() => Configuration.AnimalKillCap, v => Configuration.AnimalKillCap = v, 0, "AnimalKillCap", v => v < 0);
             SetDefault(() => Configuration.TopClansToTrack, v => Configuration.TopClansToTrack = v, 3, "TopClansToTrack", v => v <= 0);
             SetDefault(() => Configuration.JoinCutoffHours, v => Configuration.JoinCutoffHours = 6, 6, "JoinCutoffHours", v => v < 0 || v > Configuration.DurationHours);
 
@@ -298,7 +304,7 @@ namespace Oxide.Plugins
         }
     #endregion
     #region UI
-        private void AddCuiLabel(CuiElementContainer container, string parent, string anchorMin, string anchorMax, string text, int fontSize = 14, TextAnchor align = TextAnchor.MiddleLeft)
+        private void AddCuiLabel(CuiElementContainer container, string parent, string anchorMin, string anchorMax, string text, int fontSize = 13, TextAnchor align = TextAnchor.MiddleLeft)
         {
             container.Add(new CuiLabel
             {
@@ -316,7 +322,7 @@ namespace Oxide.Plugins
             }, parent, name);
         }
 
-        private void AddCuiButton(CuiElementContainer container, string parent, string anchorMin, string anchorMax, string text, string command, string color = "0.5 0.5 0.5 1", int fontSize = 14)
+        private void AddCuiButton(CuiElementContainer container, string parent, string anchorMin, string anchorMax, string text, string command, string color = "0.5 0.5 0.5 1", int fontSize = 13)
         {
             container.Add(new CuiButton
             {
@@ -461,10 +467,10 @@ namespace Oxide.Plugins
                         "KILL" => "Kill another player",
                         "DEAD" => "Killed by a player",
                         "JOKE" => "Trap/fall death",
-                        "NPC" => "Kill an NPC",
+                        "NPC" => $"Kill an NPC ({(Configuration.NpcKillCap > 0 ? $"max {Configuration.NpcKillCap}" : "no cap")})",
                         "ENT" => "Kill Heli/Bradley",
                         "BRUH" => "Killed by Heli/NPC",
-                        "WHY" => $"Animal kill >{Configuration.AnimalKillDistance}m",
+                        "WHY" => $"Animal kill >{Configuration.AnimalKillDistance}m ({(Configuration.AnimalKillCap > 0 ? $"max {Configuration.AnimalKillCap}" : "no cap")})",
                         _ => rule.Key
                     };
 
@@ -497,16 +503,16 @@ namespace Oxide.Plugins
 
             AddTextBlock("You can use commands such as /help_tournament to learn more.");
             
-			var pluginTitles = Interface.Oxide.RootPluginManager
-				.GetPlugins()
-				.Select(p => p.Title)
-				.Where(t => !string.IsNullOrEmpty(t))
-				.Distinct();
-			var pluginList = string.Join(", ", pluginTitles);
+            var pluginTitles = Interface.Oxide.RootPluginManager
+                .GetPlugins()
+                .Select(p => p.Title)
+                .Where(t => !string.IsNullOrEmpty(t))
+                .Distinct();
+            var pluginList = string.Join(", ", pluginTitles);
 
-			AddTextBlock($"Available plugins: {pluginList}");
+            AddTextBlock($"Available plugins: {pluginList}");
 
-			CuiHelper.AddUi(player, container);
+            CuiHelper.AddUi(player, container);
 
         }
         
@@ -540,28 +546,34 @@ namespace Oxide.Plugins
             ShowWelcomeUI(player);
         }
         
-        private void AddCuiInput(CuiElementContainer container, string parent, string label, string key, string value, float xLabel, float xInput, float y)
+        void AddCuiInput(CuiElementContainer container, string parent, string key, string label, string value, float xLabel, float xInput, float y)
+        {
+            container.Add(new CuiLabel
             {
-                AddCuiLabel(container, parent, $"{xLabel} {y}", $"{xLabel + 0.2f} {y + 0.035f}", label);
+                RectTransform = { AnchorMin = $"{xLabel} {y}", AnchorMax = $"{xLabel + 0.2f} {y + 0.035f}" },
+                Text = { Text = label, FontSize = 13, Align = TextAnchor.MiddleCenter }
+            }, parent);
 
-                AddCuiPanel(container, parent, $"{xInput} {y}", $"{xInput + 0.2f} {y + 0.035f}", "0.8 0.8 0.8 0.3");
+            container.Add(new CuiPanel
+            {
+                Image = { Color = "0.8 0.8 0.8 0.3" },
+                RectTransform = { AnchorMin = $"{xInput} {y}", AnchorMax = $"{xInput + 0.2f} {y + 0.035f}" }
+            }, parent);
 
-                container.Add(new CuiElement
-                {
-                    Name = $"{key}Input",
-                    Parent = parent,
-                    Components =
-                    {
-                        new CuiRectTransformComponent { AnchorMin = $"{xInput} {y}", AnchorMax = $"{xInput + 0.2f} {y + 0.035f}" },
-                        new CuiInputFieldComponent
-                        {
-                            Text = value,
-                            Align = TextAnchor.MiddleLeft,
-                            Command = $"config_set {key}"
-                        }
+            container.Add(new CuiElement
+            {
+                Name = $"input_{key}",
+                Parent = parent,
+                Components = {
+                    new CuiRectTransformComponent { AnchorMin = $"{xInput} {y}", AnchorMax = $"{xInput + 0.2f} {y + 0.035f}" },
+                    new CuiInputFieldComponent {
+                        Text = value,
+                        Align = TextAnchor.MiddleCenter,
+                        Command = $"config_set {key}"
                     }
-                });
-            }
+                }
+            });
+        }
         
         private void ShowConfigUI(BasePlayer player)
         {
@@ -598,17 +610,14 @@ namespace Oxide.Plugins
 
             float y = 0.81f;
             float xLeftLabel = 0.05f, xLeftInput = 0.25f;
-            float xRightLabel = 0.55f, xRightInput = 0.75f;
+            float xRightLabel = 0.50f, xRightInput = 0.70f;
 
-            void AddToggle(string label, string key, bool value)
+            void AddToggle(string label, string key, bool value, float xLabel, float xButton, float y)
             {
-                float xLabel = xLeftLabel;
-                float xButton = xLeftInput + 0.02f;
-
                 container.Add(new CuiLabel
                 {
                     RectTransform = { AnchorMin = $"{xLabel} {y}", AnchorMax = $"{xLabel + 0.2f} {y + 0.035f}" },
-                    Text = { Text = label, FontSize = 14, Align = TextAnchor.MiddleLeft }
+                    Text = { Text = label, FontSize = 13, Align = TextAnchor.MiddleCenter }
                 }, $"{ConfigUiPanelName}.main");
 
                 container.Add(new CuiPanel
@@ -621,44 +630,48 @@ namespace Oxide.Plugins
                 {
                     Button = { Command = $"config_set {key} {!value}", Color = value ? "0.3 0.6 0.3 1" : "0.6 0.3 0.3 1" },
                     RectTransform = { AnchorMin = $"{xButton} {y}", AnchorMax = $"{xButton + 0.2f} {y + 0.035f}" },
-                    Text = { Text = value.ToString(), FontSize = 14, Align = TextAnchor.MiddleCenter }
+                    Text = { Text = value.ToString(), FontSize = 13, Align = TextAnchor.MiddleCenter }
                 }, $"{ConfigUiPanelName}.main");
-
-                y -= 0.05f;
             }
 
-            AddCuiInput(container, $"{ConfigUiPanelName}.main", "Timezone", "Timezone", Configuration.Timezone, xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
-            AddCuiInput(container, $"{ConfigUiPanelName}.main", "StartDay", "StartDay", Configuration.StartDay, xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
-            AddCuiInput(container, $"{ConfigUiPanelName}.main", "StartHour", "StartHour", Configuration.StartHour.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
-            AddCuiInput(container, $"{ConfigUiPanelName}.main", "StartMinute", "StartMinute", Configuration.StartMinute.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
-            AddCuiInput(container, $"{ConfigUiPanelName}.main", "DurationHours", "DurationHours", Configuration.DurationHours.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
-            AddCuiInput(container, $"{ConfigUiPanelName}.main", "TopPlayersToTrack", "TopPlayersToTrack", Configuration.TopPlayersToTrack.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
-            AddCuiInput(container, $"{ConfigUiPanelName}.main", "JoinCutoffHours", "JoinCutoffHours", Configuration.JoinCutoffHours.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
-            AddCuiInput(container, $"{ConfigUiPanelName}.main", "AnimalKillDistance", "AnimalKillDistance", Configuration.AnimalKillDistance.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
-            AddCuiInput(container, $"{ConfigUiPanelName}.main", "PenaltyPointsOnExit", "PenaltyPointsOnExit", Configuration.PenaltyPointsOnExit.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "Timezone", "Server Timezone", Configuration.Timezone, xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "StartDay", "Tournament Start Day", Configuration.StartDay, xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "StartHour", "Start Hour (0–23)", Configuration.StartHour.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "StartMinute", "Start Minute (0–59)", Configuration.StartMinute.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "DurationHours", "Tournament Duration (Hours)", Configuration.DurationHours.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "TopPlayersToTrack", "Top Players to Track", Configuration.TopPlayersToTrack.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "TopClansToTrack", "Top Clans to Track", Configuration.TopClansToTrack.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "JoinCutoffHours", "Join Cutoff Time (Hours)", Configuration.JoinCutoffHours.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "AnimalKillDistance", "Animal Kill Distance (m)", Configuration.AnimalKillDistance.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "NpcKillCap", "Max NPC Kills Per Player (0 = Unlimited)", Configuration.NpcKillCap.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "AnimalKillCap", "Max Animal Kills Per Player (0 = Unlimited)", Configuration.AnimalKillCap.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddCuiInput(container, $"{ConfigUiPanelName}.main", "PenaltyPointsOnExit", "Penalty Points on Exit", Configuration.PenaltyPointsOnExit.ToString(), xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            
+            AddToggle("Enable Plugin Auto-Update", "EnableAutoUpdate", Configuration.EnableAutoUpdate, xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddToggle("Show Welcome Message", "ShowWelcomeUI", Configuration.ShowWelcomeUI, xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
+            AddToggle("Auto-Start Tournament", "AutoStartEnabled", Configuration.AutoStartEnabled, xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
 
-            AddToggle("EnableAutoUpdate", "Enable Auto-Update from GitHub", Configuration.EnableAutoUpdate);
-            AddToggle("Show Welcome Message", "ShowWelcomeUI", Configuration.ShowWelcomeUI);
-            AddToggle("AutoStartEnabled", "AutoStartEnabled", Configuration.AutoStartEnabled);
-            AddToggle("AutoEnrollEnabled", "AutoEnrollEnabled", Configuration.AutoEnrollEnabled);
-            AddToggle("PenaltyOnExitEnabled", "PenaltyOnExitEnabled", Configuration.PenaltyOnExitEnabled);
+            float toggleY = 0.81f;
 
-            float groupY = 0.81f;
+            AddToggle("Auto-Enroll Players", "AutoEnrollEnabled", Configuration.AutoEnrollEnabled, xRightLabel, xRightInput + 0.02f, toggleY); toggleY -= 0.05f;
+            AddToggle("Penalize Players Who Leave", "PenaltyOnExitEnabled", Configuration.PenaltyOnExitEnabled, xRightLabel, xRightInput + 0.02f, toggleY); toggleY -= 0.05f;
+
+            float groupY = 0.70f;
 
             foreach (var kv in Configuration.ScoreRules)
             {
-                float marginX = xRightInput + 0.03f;
+                float marginX = xRightLabel + 0.22f;
 
                 container.Add(new CuiLabel
                 {
                     RectTransform = { AnchorMin = $"{xRightLabel} {groupY}", AnchorMax = $"{xRightLabel + 0.2f} {groupY + 0.035f}" },
-                    Text = { Text = $"ScoreRules[{kv.Key}]", FontSize = 14, Align = TextAnchor.MiddleLeft }
+                    Text = { Text = $"ScoreRules[{kv.Key}]", FontSize = 13, Align = TextAnchor.MiddleCenter }
                 }, $"{ConfigUiPanelName}.main");
 
                 container.Add(new CuiPanel
                 {
                     Image = { Color = "0.8 0.8 0.8 0.3" },
-                    RectTransform = { AnchorMin = $"{marginX} {groupY}", AnchorMax = $"{marginX + 0.15f} {groupY + 0.035f}" }
+                    RectTransform = { AnchorMin = $"{marginX} {groupY}", AnchorMax = $"{marginX + 0.2f} {groupY + 0.035f}" }
                 }, $"{ConfigUiPanelName}.main");
 
                 container.Add(new CuiElement
@@ -666,10 +679,10 @@ namespace Oxide.Plugins
                     Name = $"ScoreRule_{kv.Key}",
                     Parent = $"{ConfigUiPanelName}.main",
                     Components = {
-                        new CuiRectTransformComponent { AnchorMin = $"{marginX} {groupY}", AnchorMax = $"{marginX + 0.15f} {groupY + 0.035f}" },
+                        new CuiRectTransformComponent { AnchorMin = $"{marginX} {groupY}", AnchorMax = $"{marginX + 0.2f} {groupY + 0.035f}" },
                         new CuiInputFieldComponent {
                             Text = kv.Value.ToString(),
-                            Align = TextAnchor.MiddleLeft,
+                            Align = TextAnchor.MiddleCenter,
                             Command = $"config_set ScoreRules.{kv.Key}"
                         }
                     }
@@ -682,18 +695,18 @@ namespace Oxide.Plugins
 
             foreach (var kv in Configuration.KitPrices)
             {
-                float marginX = xRightInput + 0.03f;
+                float marginX = xRightLabel + 0.22f;
 
                 container.Add(new CuiLabel
                 {
                     RectTransform = { AnchorMin = $"{xRightLabel} {groupY}", AnchorMax = $"{xRightLabel + 0.2f} {groupY + 0.035f}" },
-                    Text = { Text = $"KitPrices[{kv.Key}]", FontSize = 14, Align = TextAnchor.MiddleLeft }
+                    Text = { Text = $"KitPrices[{kv.Key}]", FontSize = 13, Align = TextAnchor.MiddleCenter }
                 }, $"{ConfigUiPanelName}.main");
 
                 container.Add(new CuiPanel
                 {
                     Image = { Color = "0.8 0.8 0.8 0.3" },
-                    RectTransform = { AnchorMin = $"{marginX} {groupY}", AnchorMax = $"{marginX + 0.15f} {groupY + 0.035f}" }
+                    RectTransform = { AnchorMin = $"{marginX} {groupY}", AnchorMax = $"{marginX + 0.2f} {groupY + 0.035f}" }
                 }, $"{ConfigUiPanelName}.main");
 
                 container.Add(new CuiElement
@@ -701,10 +714,10 @@ namespace Oxide.Plugins
                     Name = $"KitPrice_{kv.Key}",
                     Parent = $"{ConfigUiPanelName}.main",
                     Components = {
-                        new CuiRectTransformComponent { AnchorMin = $"{marginX} {groupY}", AnchorMax = $"{marginX + 0.15f} {groupY + 0.035f}" },
+                        new CuiRectTransformComponent { AnchorMin = $"{marginX} {groupY}", AnchorMax = $"{marginX + 0.2f} {groupY + 0.035f}" },
                         new CuiInputFieldComponent {
                             Text = kv.Value.ToString(),
-                            Align = TextAnchor.MiddleLeft,
+                            Align = TextAnchor.MiddleCenter,
                             Command = $"config_set KitPrices.{kv.Key}"
                         }
                     }
@@ -717,14 +730,14 @@ namespace Oxide.Plugins
             {
                 Button = { Command = "config_save", Color = "0.2 0.6 0.2 1" },
                 RectTransform = { AnchorMin = "0.27 0.02", AnchorMax = "0.47 0.07" },
-                Text = { Text = "Save & Reload", FontSize = 14, Align = TextAnchor.MiddleCenter }
+                Text = { Text = "Save & Reload", FontSize = 13, Align = TextAnchor.MiddleCenter }
             }, $"{ConfigUiPanelName}.main");
 
             container.Add(new CuiButton
             {
                 Button = { Command = "config_cancel", Color = "0.6 0.2 0.2 1" },
                 RectTransform = { AnchorMin = "0.53 0.02", AnchorMax = "0.73 0.07" },
-                Text = { Text = "Cancel", FontSize = 14, Align = TextAnchor.MiddleCenter }
+                Text = { Text = "Cancel", FontSize = 13, Align = TextAnchor.MiddleCenter }
             }, $"{ConfigUiPanelName}.main");
             
             string currentVersion = GetCurrentPluginVersion();
@@ -745,10 +758,10 @@ namespace Oxide.Plugins
 
             container.Add(new CuiLabel
             {
-                RectTransform = { AnchorMin = "0.20 0.84", AnchorMax = "0.80 0.96" },
+                RectTransform = { AnchorMin = "0.20 0.84", AnchorMax = "0.80 0.93" },
                 Text = {
                     Text = $"<color={versionColor}>RustRoyale v{currentVersion} - {versionStatus}</color>",
-                    FontSize = 14,
+                    FontSize = 13,
                     Align = TextAnchor.MiddleCenter
                 }
             }, $"{ConfigUiPanelName}.main");
@@ -1403,6 +1416,9 @@ namespace Oxide.Plugins
             Puts("[Debug] StartTournament invoked.");
             
             participants.Clear();
+            npcKillCounts.Clear();
+            animalKillCounts.Clear();
+
             foreach (var id in participantsData.Keys)
                 participants.Add(id);
             Puts("[Debug] Participants HashSet rebuilt for new tournament.");
@@ -1942,6 +1958,8 @@ namespace Oxide.Plugins
             if (Configuration.ScoreRules.TryGetValue("NPC", out int points))
             {
                 string npcName = GetFriendlyNpcName(victim.ShortPrefabName);
+                if (HasReachedKillCap(npcKillCounts, attacker.userID, Configuration.NpcKillCap, "NPC", attacker))
+                return false;
                 UpdatePlayerScore(attacker.userID, "NPC", $"eliminating an NPC ({npcName})", victim, info, entityName: npcName);
                 return true;
             }
@@ -2017,14 +2035,7 @@ namespace Oxide.Plugins
 
             string entityType = prefabName.Contains("helicopter") ? "Helicopter" : "Bradley";
 
-            UpdatePlayerScore(
-                killer.userID,
-                "ENT",
-                $"destroying a {entityType}",
-                null,
-                info,
-                entityName: entityType
-            );
+            UpdatePlayerScore(killer.userID, "ENT", $"destroying a {entityType}", null, info, entityName: entityType);
 
             Puts($"[Debug] {killer.displayName} earned {points} point(s) for downing a {entityType}.");
             return true;
@@ -2047,19 +2058,32 @@ namespace Oxide.Plugins
                 return false;
 
             string animalName = GetFriendlyAnimalName(entity.ShortPrefabName);
+            
+            if (HasReachedKillCap(animalKillCounts, killer.userID, Configuration.AnimalKillCap, "animal", killer))
+            return false;
 
-            UpdatePlayerScore(
-                killer.userID,
-                "WHY",
-                $"killing an animal ({animalName}) from {distance:F1} meters away",
-                null,
-                info,
-                entityName: animalName,
-                distance: distance
-            );
+            UpdatePlayerScore(killer.userID, "WHY", $"killing an animal ({animalName}) from {distance:F1} meters away", null, info, entityName: animalName, distance: distance);
 
             Puts($"[Debug] Awarded {points} pt(s) to {killer.displayName} for {animalName} kill at {distance:F1} m");
             return true;
+        }
+    #endregion
+    #region Kill Cap
+        private bool HasReachedKillCap(Dictionary<ulong, int> tracker, ulong userId, int cap, string label, BasePlayer player = null)
+        {
+            if (cap <= 0) return false;
+
+            tracker.TryGetValue(userId, out int count);
+            if (count >= cap)
+            {
+                string message = $"[Debug] {(player?.displayName ?? userId.ToString())} reached {label} cap ({cap}).";
+                Puts(message);
+                player?.ChatMessage($"You've reached the maximum allowed {label} kills for this tournament.");
+                return true;
+            }
+
+            tracker[userId] = count + 1;
+            return false;
         }
     #endregion
     #region Score Handling
