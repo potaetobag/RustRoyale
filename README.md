@@ -127,6 +127,8 @@ RustRoyale fits a variety of playstyles and scenarios, including:
   "TopPlayersToTrack": 3,
   "TopClansToTrack": 3,
   "JoinCutoffHours": 0,
+  "NpcKillCap": 0,
+  "AnimalKillCap": 0,
   "NotificationIntervals": [
     600,
     60
