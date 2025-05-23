@@ -24,5 +24,6 @@
   "NoScores": "No scores available yet. Join the tournament and make some history!",
   "TournamentAboutToStart": "The tournament is about to start! Opt-in now to participate.",
   "TournamentCountdown": "Tournament starting soon! {Time} left to join.",
-  "LeaveTournamentPenalty": "{PlayerName} left the tournament and lost {PenaltyPoints} points!"
+  "LeaveTournamentPenalty": "{PlayerName} left the tournament and lost {PenaltyPoints} points!",
+  "TournamentWinners", "The tournament is over! Here are the winners:\n{PlayerList}"
 }
