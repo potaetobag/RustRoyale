@@ -16,10 +16,12 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.2.5"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.2.6"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
         private const string ConfigUiPanelName = "RustRoyale_Config_UI";
+        private int _langDownloadsCompleted = 0;
+        private const int RequiredLangDownloads = 2;
         private readonly Dictionary<string, string> pendingConfig = new Dictionary<string, string>();
         private readonly Dictionary<ulong, int> npcKillCounts = new();
         private readonly Dictionary<ulong, int> animalKillCounts = new();
@@ -38,6 +40,7 @@ namespace Oxide.Plugins
         private ConfigData Configuration;
         private class ConfigData
         {
+            public string DefaultLanguage = "en";
             public string DiscordWebhookUrl { get; set; } = "";
             public string ChatFormat { get; set; } = "[<color=#d97559>RustRoyale</color>] {message}";
             public string ChatIconSteamId { get; set; } = "76561199815164411";
@@ -71,37 +74,6 @@ namespace Oxide.Plugins
                 {"WHY", 5}       // Award points for killing an animal (wolf, boar, bear, stag, deer) from over Xm away 
             };
             public float AnimalKillDistance { get; set; } = 150f;
-            public Dictionary<string, string> MessageTemplates { get; set; } = new Dictionary<string, string>
-            {
-                {"StartTournament", "Brace yourselves, champions! The tournament has begun! Time to show off those pro skills (or hilarious fails). Time left: {TimeRemaining}. Duration: {Duration} hours."},
-                {"EndTournament", "The tournament is over! Congrats to the winners, and for the rest... better luck next time (maybe practice a bit?)."},
-                {"ResumeTournament", "Welcome back, warriors! The tournament has been resumed. Time left: {TimeRemaining}. Duration: {Duration} hours."},
-                {"PlayerScoreUpdate", "{PlayerName} just bagged {Score} point{PluralS} for {Action}. Somebody's on fire!"},
-                {"TopPlayers", "Leaderboard time! Top {Count} players are: {PlayerList}. Did your name make the cut, or are you just here for fun?"},
-                {"TimeRemaining", "Tick-tock! Time remaining in the tournament: {Time}. Don't waste it—score some points!"},
-                {"JoinTournament", "{PlayerName} has entered the fray! Grab the popcorn, this should be good."},
-                {"LeaveTournament", "{PlayerName} has exited the battlefield. Maybe they got scared? We’ll never know."},
-                {"KitPurchaseSuccess", "{PlayerName} has successfully purchased the {KitName} kit for {Price} points. Your new balance is {TotalPoints} points."},
-                {"KillPlayerWithEntity", "{PlayerName} earned {Score} point{PluralS} for eliminating {VictimName} with {EntityName} to respawn land! Total score: {TotalScore}. Savage!"},
-                {"SelfInflictedDeath", "Oops! {PlayerName} lost {Score} point{PluralS} for a self-inflicted oopsie. Total score: {TotalScore}. Smooth move, buddy."},
-                
-                {"KillEntity", "{PlayerName} earned {Score} point{PluralS} for obliterating {ArticleEntityName}! Total score: {TotalScore}. BOOM!" },
-                {"KillNPC", "{PlayerName} earned {Score} point{PluralS} for bravely taking down {ArticleEntityName}! Total score: {TotalScore}." },
-                {"KilledByPlayer", "{VictimName} lost {Score} point{PluralS} for being killed by {AttackerName}. Total score: {TotalScore}. Better luck next time!"},
-                {"DeathByBRUH", "{PlayerName} lost {Score} point{PluralS} for getting defeated by {ArticleEntityName}. Total score: {TotalScore}. BRUH moment!"},
-                {"KillAnimal", "{PlayerName} earned {Score} point{PluralS} for killing {ArticleEntityName} from over {Distance} meters away! Total score: {TotalScore}." },
-                
-                {"NotInTournament", "Uh-oh! You’re not part of the tournament. Join in, don’t be shy!"},
-                {"NoPermission", "Sorry, you don’t have permission to {ActionName}. Maybe ask the admins for a favor?"},
-                {"AlreadyParticipating", "Relax, {PlayerName}. You’re already in the tournament. No need to double-dip!"},
-                {"AlreadyOptedIn", "Nice try, {PlayerName}, but you’re already opted in. Eager much?"},
-                {"OptedOutTournament", "{PlayerName} has decided to opt out. Bye-bye! Don’t let FOMO get you."},
-                {"TournamentAlreadyRunning", "Whoa there! A tournament is already underway. Time left: {TimeRemaining}. Jump in or cheer from the sidelines!"},
-                {"NoScores", "No scores available yet. Join the tournament and make some history!"},
-                {"TournamentAboutToStart", "The tournament is about to start! Opt-in now to participate."},
-                {"TournamentCountdown", "Tournament starting soon! {Time} left to join."},
-                {"LeaveTournamentPenalty", "{PlayerName} left the tournament and lost {PenaltyPoints} points!"}
-            };
             public Dictionary<string, int> KitPrices { get; set; } = new Dictionary<string, int>
             {
                 {"Starter", 5},
@@ -110,7 +82,6 @@ namespace Oxide.Plugins
                 {"Gold", 75},
                 {"Platinum", 100}
             };
-
         }
     #endregion
     #region Configuration Handling
@@ -256,6 +227,7 @@ namespace Oxide.Plugins
             }
 
             SaveParticipantsData();
+            SavePlayerLanguages();
         }
 
         private void CleanupTimers()
@@ -271,7 +243,97 @@ namespace Oxide.Plugins
                 countdownTimer = null;
             }
         }
-    #endregion 
+    #endregion
+    #region Language
+        private Dictionary<ulong, string> playerLanguages = new();
+
+        private void SavePlayerLanguages() =>
+            Interface.Oxide.DataFileSystem.WriteObject("RustRoyale_PlayerLanguages", playerLanguages);
+
+        private void LoadPlayerLanguages() =>
+            playerLanguages = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<ulong, string>>("RustRoyale_PlayerLanguages");
+
+        private string GetPlayerLang(BasePlayer player)
+        {
+            if (playerLanguages.TryGetValue(player.userID, out var lang) && Translations.ContainsKey(lang))
+                return lang;
+
+            return Configuration.DefaultLanguage;
+        }
+
+        private string Lang(string key, BasePlayer player = null, Dictionary<string, string> tokens = null)
+        {
+            var lang = player != null ? GetPlayerLang(player) : Configuration.DefaultLanguage;
+
+            if (!Translations.TryGetValue(lang, out var dict) || !dict.TryGetValue(key, out var message))
+                message = Translations["en"].TryGetValue(key, out var fallback) ? fallback : key;
+
+            if (tokens != null)
+            {
+                foreach (var token in tokens)
+                    message = message.Replace("{" + token.Key + "}", token.Value);
+            }
+
+            return message;
+        }
+        
+        private void EnsureLatestLangFile(string langCode)
+        {
+            string url = $"https://raw.githubusercontent.com/potaetobag/RustRoyale/main/lang/{langCode}/RustRoyale.json";
+            string fullPath = Path.Combine(Interface.Oxide.RootDirectory, "oxide", "lang", langCode, "RustRoyale.json");
+
+            webrequest.Enqueue(url, null, (code, response) =>
+            {
+                if (code != 200 || string.IsNullOrEmpty(response))
+                {
+                    Puts($"[LangLoader] Failed to fetch '{langCode}' language file. HTTP Code: {code}");
+                }
+                else
+                {
+                    try
+                    {
+                        bool shouldWrite = true;
+
+                        if (File.Exists(fullPath))
+                        {
+                            string currentContent = File.ReadAllText(fullPath);
+                            shouldWrite = currentContent.Trim() != response.Trim();
+                        }
+
+                        if (shouldWrite)
+                        {
+                            string dir = Path.GetDirectoryName(fullPath);
+                            if (!Directory.Exists(dir))
+                                Directory.CreateDirectory(dir);
+
+                            Puts($"[LangLoader] Attempting to write to: {fullPath}");
+                            File.WriteAllText(fullPath, response);
+                            Puts($"[LangLoader] Updated language file: oxide/lang/{langCode}/RustRoyale.json");
+                        }
+                        else
+                        {
+                            Puts($"[LangLoader] oxide/lang/{langCode}/RustRoyale.json is already up to date.");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Puts($"[LangLoader] Error saving oxide/lang/{langCode}/RustRoyale.json: {ex.Message}");
+                    }
+                }
+
+                _langDownloadsCompleted++;
+                Puts($"[LangLoader] Completed {_langDownloadsCompleted}/{RequiredLangDownloads} language downloads.");
+
+                if (_langDownloadsCompleted >= RequiredLangDownloads)
+                {
+                    LoadTranslations();
+                    Puts("[LangLoader] All language files downloaded. Continuing initialization.");
+                    ContinueInitialization();
+                }
+
+            }, this);
+        }
+    #endregion
     #region Timezone Handling
         private TimeZoneInfo GetTimezone()
         {
@@ -406,10 +468,10 @@ namespace Oxide.Plugins
             
             y -= 0.07f;
 
-            AddTextBlock("<b>Welcome to RustRoyale!</b>", 18);
-            AddTextBlock("Get ready for an adrenaline-pumping Rust experience like no other. RustRoyale is a competitive tournament that rewards skill, strategy, and survival instincts. Earn points by taking down other players, eliminating NPC threats, and showing off your long-range hunting skills. But be warned—deaths, especially from traps or careless encounters with NPCs, will cost you. Sharpen your weapons, team up or go solo, and claim your spot at the top of the leaderboard!");
+            AddTextBlock(Lang("WelcomeTitle", player), 18);
+            AddTextBlock(Lang("WelcomeDescription", player));
             y -= 0.1f;
-            AddTextBlock("Join our Discord channel for updates: https://discord.gg/y2v4RaKP");
+            AddTextBlock(Lang("WelcomeDiscord", player));
 
             y -= 0.05f;
 
@@ -599,7 +661,7 @@ namespace Oxide.Plugins
                 RectTransform = { AnchorMin = "0 0.93", AnchorMax = "1 1" }
             }, $"{ConfigUiPanelName}.main", $"{ConfigUiPanelName}.header");
 
-            AddCuiLabel(container, $"{ConfigUiPanelName}.header", "0.02 0", "0.9 1", "⚙ RustRoyale Configuration", 18);
+            AddCuiLabel(container, $"{ConfigUiPanelName}.header", "0.02 0", "0.9 1", "RustRoyale Configuration", 18);
 
             container.Add(new CuiButton
             {
@@ -730,14 +792,14 @@ namespace Oxide.Plugins
             {
                 Button = { Command = "config_save", Color = "0.2 0.6 0.2 1" },
                 RectTransform = { AnchorMin = "0.27 0.02", AnchorMax = "0.47 0.07" },
-                Text = { Text = "Save & Reload", FontSize = 13, Align = TextAnchor.MiddleCenter }
+                Text = { Text = Lang("ConfigSave"), FontSize = 13, Align = TextAnchor.MiddleCenter }
             }, $"{ConfigUiPanelName}.main");
 
             container.Add(new CuiButton
             {
                 Button = { Command = "config_cancel", Color = "0.6 0.2 0.2 1" },
                 RectTransform = { AnchorMin = "0.53 0.02", AnchorMax = "0.73 0.07" },
-                Text = { Text = "Cancel", FontSize = 13, Align = TextAnchor.MiddleCenter }
+                Text = { Text = Lang("ConfigCancel"), FontSize = 13, Align = TextAnchor.MiddleCenter }
             }, $"{ConfigUiPanelName}.main");
             
             string currentVersion = GetCurrentPluginVersion();
@@ -850,11 +912,19 @@ namespace Oxide.Plugins
                     }
 
                     prop.SetValue(Configuration, converted);
-                    player.ChatMessage($"Updated {kv.Key} = {converted}");
+                    player.ChatMessage(Lang("ConfigUpdated", player, new Dictionary<string, string>
+                    {
+                        { "Key", kv.Key },
+                        { "Value", converted.ToString() }
+                    }));
                 }
                 catch (Exception ex)
                 {
-                    player.ChatMessage($"Failed to parse {kv.Key}: {ex.Message}");
+                    player.ChatMessage(Lang("ConfigParseError", player, new Dictionary<string, string>
+                    {
+                        { "Key", kv.Key },
+                        { "Error", ex.Message }
+                    }));
                 }
             }
 
@@ -880,6 +950,15 @@ namespace Oxide.Plugins
         private void Init()
         {
             permission.RegisterPermission(AdminPermission, this);
+            LoadPlayerLanguages();
+
+            EnsureLatestLangFile("en");
+            EnsureLatestLangFile("es");
+        }
+        
+        private void ContinueInitialization()
+        {
+            LoadTranslations();
             LoadWelcomeOptOut();
             ValidateConfiguration();
             NormaliseKitPrices();
@@ -1018,6 +1097,45 @@ namespace Oxide.Plugins
         {
             var match = Regex.Match(source, @"\[Info\(\s*""[^""]+"",\s*""[^""]+"",\s*""([^""]+)""\)");
             return match.Success ? match.Groups[1].Value : null;
+        }
+        
+        private Dictionary<string, Dictionary<string, string>> Translations = new();
+        private readonly string[] SupportedLanguages = new[] { "en", "es" };
+
+        private void LoadTranslations()
+        {
+            Translations = new Dictionary<string, Dictionary<string, string>>();
+
+            foreach (var lang in SupportedLanguages)
+            {
+                string path = Path.Combine(Interface.Oxide.RootDirectory, "oxide", "lang", lang, "RustRoyale.json");
+
+                if (!File.Exists(path))
+                {
+                    Puts($"[Warning] Language file not found for '{lang}' at path '{path}'");
+                    continue;
+                }
+
+                try
+                {
+                    var content = File.ReadAllText(path);
+                    var entries = JsonConvert.DeserializeObject<Dictionary<string, string>>(content);
+
+                    if (entries != null && entries.Count > 0)
+                    {
+                        Translations[lang] = entries;
+                        Puts($"[LangLoader] Loaded {entries.Count} translations for '{lang}'");
+                    }
+                    else
+                    {
+                        Puts($"[Warning] Translation file '{lang}' is empty or invalid.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Puts($"[LangLoader] Error loading translations for '{lang}': {ex.Message}");
+                }
+            }
         }
 
         private void OnServerInitialized()
@@ -1186,11 +1304,22 @@ namespace Oxide.Plugins
                 
                 int activeCount = participantsData.Keys.Where(id => !inactiveParticipants.Contains(id)).Count();
                 string startTimeLocal = GetLocalTime(tournamentStartTime).ToString("yyyy-MM-dd HH:mm:ss");
-                string scheduleMessage = $"Heads up, warriors! The tournament kicks off at {startTimeLocal} ({Configuration.Timezone}) and will rage for {Configuration.DurationHours} hours. Already, {activeCount} heroes have signed up to battle it out. If you’re not in yet, type /open_tournament and join the fray!";
-                SendTournamentMessage(scheduleMessage);
+
+                var tokens = new Dictionary<string, string>
+                {
+                    { "StartTime", startTimeLocal },
+                    { "Timezone", Configuration.Timezone },
+                    { "Duration", Configuration.DurationHours.ToString() },
+                    { "ActiveCount", activeCount.ToString() }
+                };
+
+                string message = Lang("ScheduleMessage", null, tokens);
+                SendTournamentMessage(message);
+
                 if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
                 {
-                    SendDiscordMessage(scheduleMessage);
+                    string discordMessage = Lang("ScheduleMessage", null, tokens);
+                    SendDiscordMessage(discordMessage);
                 }
 
                 ScheduleCountdown(tournamentStartTime, () =>
@@ -1244,7 +1373,7 @@ namespace Oxide.Plugins
                 string formattedTime = FormatTimeRemaining(remainingTime);
                 Puts($"[Debug] Sending tournament countdown message: {formattedTime}");
 
-                string globalMessage = FormatMessage(Configuration.MessageTemplates["TournamentCountdown"], new Dictionary<string, string>
+                string globalMessage = Lang("TournamentCountdown", null, new Dictionary<string, string>
                 {
                     { "Time", formattedTime }
                 });
@@ -1259,7 +1388,7 @@ namespace Oxide.Plugins
 
                 if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
                 {
-                    string discordMessage = FormatMessage(Configuration.MessageTemplates["TournamentCountdown"], new Dictionary<string, string>
+                    string discordMessage = Lang("TournamentCountdown", null, new Dictionary<string, string>
                     {
                         { "Time", formattedTime }
                     });
@@ -1363,18 +1492,22 @@ namespace Oxide.Plugins
                     ScheduleTournamentEnd();
 
                     TimeSpan remaining = tournamentEndTime - DateTime.UtcNow;
-                    var msg = FormatMessage(
-                        Configuration.MessageTemplates["ResumeTournament"],
-                        new Dictionary<string,string>
-                        {
-                            { "TimeRemaining", FormatTimeRemaining(remaining) },
-                            { "Duration",      Configuration.DurationHours.ToString() }
-                        }
-                    );
 
+                    var tokens = new Dictionary<string, string>
+                    {
+                        { "TimeRemaining", FormatTimeRemaining(remaining) },
+                        { "Duration", Configuration.DurationHours.ToString() }
+                    };
+
+                    var msg = Lang("ResumeTournament", null, tokens);
                     SendTournamentMessage(msg);
+
                     if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-                        SendDiscordMessage(msg);
+                    {
+                        var discordMsg = Lang("ResumeTournament", null, tokens);
+                        SendDiscordMessage(discordMsg);
+                    }
+
                 }
             }
         }
@@ -1396,7 +1529,7 @@ namespace Oxide.Plugins
 
                 Puts($"[Debug] Time remaining in the current tournament: {FormatTimeRemaining(tournamentEndTime - DateTime.UtcNow)}");
 
-                string message = FormatMessage(Configuration.MessageTemplates["TournamentAlreadyRunning"], new Dictionary<string, string>
+                string message = Lang("TournamentAlreadyRunning", null, new Dictionary<string, string>
                 {
                     { "TimeRemaining", FormatTimeRemaining(tournamentEndTime - DateTime.UtcNow) }
                 });
@@ -1468,7 +1601,7 @@ namespace Oxide.Plugins
 
                 ScheduleTournamentEnd();
 
-                string globalMessage = FormatMessage(Configuration.MessageTemplates["StartTournament"], new Dictionary<string, string>
+                string globalMessage = Lang("StartTournament", null, new Dictionary<string, string>
                 {
                     { "TimeRemaining", FormatTimeRemaining(tournamentEndTime - DateTime.UtcNow) },
                     { "Duration", Configuration.DurationHours.ToString() }
@@ -1546,7 +1679,7 @@ namespace Oxide.Plugins
                     }
                     else
                     {
-                        resultsMessage += "No participants scored points in this tournament.";
+                        resultsMessage += Lang("NoScoresInTournament");
                     }
 
                     var clanTotals = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -1590,14 +1723,14 @@ namespace Oxide.Plugins
                         .ToList();
 
                     var globalMessage = new StringBuilder();
-                    globalMessage.AppendLine(FormatMessage(Configuration.MessageTemplates["EndTournament"], new Dictionary<string, string>()));
+                    globalMessage.AppendLine(Lang("EndTournament"));
                     globalMessage.AppendLine();
                     globalMessage.AppendLine(resultsMessage);
 
                     if (topClans.Any())
                     {
                         globalMessage.AppendLine();
-                        globalMessage.AppendLine("Top Clans/Groups:");
+                        globalMessage.AppendLine(Lang("TopClansHeader"));
                         globalMessage.AppendLine(string.Join("\n", topClans
                             .Select((kv, idx) =>
                             {
@@ -1631,6 +1764,17 @@ namespace Oxide.Plugins
 
         private void OnPlayerInit(BasePlayer player)
         {
+            if (!playerLanguages.ContainsKey(player.userID))
+            {
+                string lang = player.net?.connection?.info?.GetString("lang")?.ToLower();
+                if (!string.IsNullOrEmpty(lang) && Translations.ContainsKey(lang))
+                {
+                    playerLanguages[player.userID] = lang;
+                    SavePlayerLanguages();
+                    Puts($"[Debug] Detected language '{lang}' for {player.displayName}.");
+                }
+            }
+            
             if (player == null || string.IsNullOrEmpty(player.displayName))
                 return;
 
@@ -1666,7 +1810,7 @@ namespace Oxide.Plugins
                 }
 
                 SaveParticipantsData();
-                SendPlayerMessage(player, "You have been automatically enrolled into the RustRoyale tournament system, you can opt out by entering /close_tournament.");
+                SendPlayerMessage(player, Lang("AutoEnrolled", player));
                 Puts($"[Debug] Automatically enrolled player: {player.displayName} ({player.userID})");
             }
         }
@@ -2313,12 +2457,6 @@ namespace Oxide.Plugins
                 _ => "PlayerScoreUpdate"
             };
 
-            if (!Configuration.MessageTemplates.TryGetValue(templateKey, out string template))
-            {
-                PrintWarning($"[Error] Message template for action code '{actionCode}' not found. Using default.");
-                template = Configuration.MessageTemplates["PlayerScoreUpdate"];
-            }
-
             attackerName ??= GetPlayerName(userId);
 
             foreach (var generic in new[] { "an NPC", "an entity", "an animal" })
@@ -2351,7 +2489,7 @@ namespace Oxide.Plugins
                 placeholders["Distance"] = distance.HasValue ? distance.Value.ToString("F1") : Configuration.AnimalKillDistance.ToString();
             }
 
-            string globalMessage = FormatMessage(template, placeholders);
+            string globalMessage = Lang(templateKey, null, placeholders);
 
             SendTournamentMessage(globalMessage);
             if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
@@ -2414,7 +2552,7 @@ namespace Oxide.Plugins
 
             var playerList = string.Join("\n", topPlayers.Select((p, i) => $"{i + 1}. {p.Name} ({p.Score} Points)"));
 
-            var message = FormatMessage(Configuration.MessageTemplates["TournamentWinners"], new Dictionary<string, string>
+            var message = Lang("TournamentWinners", null, new Dictionary<string, string>
             {
                 { "PlayerCount", topPlayers.Count.ToString() },
                 { "PlayerList", playerList }
@@ -2465,12 +2603,6 @@ namespace Oxide.Plugins
     #region Notifications Handling
         private string Notify(string templateName, BasePlayer player, int score = 0, string action = "", string entityType = "", string victimName = "", Dictionary<string, string> placeholders = null)
         {
-            if (!Configuration.MessageTemplates.TryGetValue(templateName, out var template))
-            {
-                PrintWarning($"Template '{templateName}' not found in configuration.");
-                return null;
-            }
-
             placeholders ??= new Dictionary<string, string>
             {
                 ["PlayerName"] = player?.displayName ?? "Unknown",
@@ -2482,14 +2614,9 @@ namespace Oxide.Plugins
                 ["PluralS"] = Math.Abs(score) == 1 ? "" : "s"
             };
 
-            foreach (var placeholder in placeholders)
-            {
-                template = template.Replace($"{{{placeholder.Key}}}", placeholder.Value);
-            }
-
-            Server.Broadcast(template, ulong.Parse(Configuration.ChatIconSteamId));
-
-            return template;
+            string message = Lang(templateName, player, placeholders);
+            Server.Broadcast(message, ulong.Parse(Configuration.ChatIconSteamId));
+            return message;
         }
 
         private IEnumerable<string> GetPlaceholdersFromTemplate(string template)
@@ -2507,67 +2634,6 @@ namespace Oxide.Plugins
             return template;
         }
 
-        private void ValidateMessageTemplates()
-        {
-            var defaultTemplates = new Dictionary<string, string>
-            {
-                {"StartTournament", "The tournament has started! Good luck to all participants! Time left: {TimeRemaining}."},
-                {"EndTournament", "The tournament has ended! Congratulations to the top players!"},
-                {"PlayerScoreUpdate", "{PlayerName} earned {Score} point{PluralS} for {Action}. Total score: {TotalScore}."},
-                {"TopPlayers", "Top {Count} players: {PlayerList}."},
-                {"TimeRemaining", "Time remaining in the tournament: {Time}."},
-                {"TournamentWinners", "The tournament is over! Here are the winners:\n{PlayerList}"}
-            };
-
-            var missingTemplates = new List<string>();
-            var missingPlaceholders = new Dictionary<string, List<string>>();
-
-            foreach (var templateKey in defaultTemplates.Keys)
-            {
-                if (!Configuration.MessageTemplates.TryGetValue(templateKey, out string message))
-                {
-                    missingTemplates.Add(templateKey);
-                    Configuration.MessageTemplates[templateKey] = defaultTemplates[templateKey];
-                    continue;
-                }
-
-                var requiredPlaceholders = defaultTemplates[templateKey]
-                    .Split(new[] { '{', '}' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Where((s, i) => i % 2 == 1)
-                    .ToList();
-
-                var placeholdersNotFound = requiredPlaceholders
-                    .Where(placeholder => !message.Contains($"{{{placeholder}}}"))
-                    .ToList();
-
-                if (placeholdersNotFound.Any())
-                {
-                    missingPlaceholders[templateKey] = placeholdersNotFound;
-                }
-            }
-
-            foreach (var missingTemplate in missingTemplates)
-            {
-                PrintWarning($"Template '{missingTemplate}' was missing and has been added with default.");
-            }
-
-            foreach (var missing in missingPlaceholders)
-            {
-                PrintWarning($"Template '{missing.Key}' is missing placeholders: {string.Join(", ", missing.Value)}");
-            }
-
-            if (!missingTemplates.Any() && !missingPlaceholders.Any())
-            {
-                Puts("All templates validated successfully.");
-            }
-            else
-            {
-                PrintWarning("Template validation completed with issues. Review the warnings.");
-            }
-
-            SaveConfig();
-        }
-
         private void SendFormattedMessage(BasePlayer player, string message)
         {
             if (player == null || string.IsNullOrEmpty(message)) return;
@@ -2575,7 +2641,6 @@ namespace Oxide.Plugins
             try
             {
                 var formattedMessage = Configuration.ChatFormat.Replace("{message}", message);
-
                 player.SendConsoleCommand("chat.add", ulong.Parse(Configuration.ChatIconSteamId), Configuration.ChatUsername, formattedMessage);
             }
             catch (Exception ex)
@@ -2595,7 +2660,6 @@ namespace Oxide.Plugins
             try
             {
                 string formattedMessage = Configuration.ChatFormat.Replace("{message}", message);
-
                 Server.Broadcast(formattedMessage, ulong.Parse(Configuration.ChatIconSteamId));
             }
             catch (Exception ex)
@@ -2684,6 +2748,7 @@ namespace Oxide.Plugins
                 return;
 
             bool pointsDeducted = false;
+
             lock (participantsDataLock)
             {
                 if (participant.Score >= kitPrice)
@@ -2693,49 +2758,44 @@ namespace Oxide.Plugins
                 }
             }
 
+            var tokens = new Dictionary<string, string>
+            {
+                ["PlayerName"] = player.displayName,
+                ["KitName"] = kitName,
+                ["Price"] = kitPrice.ToString(),
+                ["TotalPoints"] = participant.Score.ToString()
+            };
+
             if (!pointsDeducted)
             {
                 lock (participantsDataLock)
                 {
                     participant.Score -= kitPrice;
+                    tokens["TotalPoints"] = participant.Score.ToString();
                 }
+
                 SaveParticipantsData();
 
                 PrintWarning($"[RustRoyale] {player.displayName} received kit '{kitName}' without sufficient points. Score forced to {participant.Score}.");
                 LogEvent($"{player.displayName} forced into negative score ({participant.Score}) after kit '{kitName}' could not be fully charged.");
 
-                var debtMsg = FormatMessage(
-                    Configuration.MessageTemplates["KitPurchaseSuccess"],
-                    new Dictionary<string,string>
-                    {
-                        ["PlayerName"]  = player.displayName,
-                        ["KitName"]     = kitName,
-                        ["Price"]       = kitPrice.ToString(),
-                        ["TotalPoints"] = participant.Score.ToString()
-                    }
-                );
+                string debtMsg = Lang("KitPurchaseSuccess", null, tokens);
                 SendTournamentMessage(debtMsg);
+
                 if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-                    SendDiscordMessage(debtMsg);
+                    SendDiscordMessage(Lang("KitPurchaseSuccess", null, tokens));
 
                 return;
             }
 
             SaveParticipantsData();
+            tokens["TotalPoints"] = participant.Score.ToString();
 
-            var successMsg = FormatMessage(
-                Configuration.MessageTemplates["KitPurchaseSuccess"],
-                new Dictionary<string,string>
-                {
-                    ["PlayerName"]  = player.displayName,
-                    ["KitName"]     = kitName,
-                    ["Price"]       = kitPrice.ToString(),
-                    ["TotalPoints"] = participant.Score.ToString()
-                }
-            );
+            string successMsg = Lang("KitPurchaseSuccess", null, tokens);
             SendTournamentMessage(successMsg);
+
             if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-                SendDiscordMessage(successMsg);
+                SendDiscordMessage(Lang("KitPurchaseSuccess", null, tokens));
 
             LogEvent($"{participant.Name} purchased kit '{kitName}' for {kitPrice} points. New Score: {participant.Score}");
         }
@@ -2748,22 +2808,28 @@ namespace Oxide.Plugins
             SendPlayerMessage(player, message);
         }
 
-        private string GetTimeRemainingMessage()
+        private string GetTimeRemainingMessage(BasePlayer player = null)
         {
             if (!isTournamentRunning)
-                return "No tournament is currently running.";
+                return Lang("NoTournamentRunning", player);
 
             TimeSpan remainingTime = tournamentEndTime - DateTime.UtcNow;
             string formattedTime = FormatTimeRemaining(remainingTime);
-            return $"Time remaining in the tournament: {formattedTime}";
+
+            return Lang("TimeRemaining", player, new Dictionary<string, string>
+            {
+                { "Time", formattedTime }
+            });
         }
 
-        private void DisplayTimeRemaining()
+       private void DisplayTimeRemaining()
         {
-            string message = GetTimeRemainingMessage();
+            TimeSpan remainingTime = tournamentEndTime - DateTime.UtcNow;
+            string formattedTime = FormatTimeRemaining(remainingTime);
+
             Notify("TimeRemaining", null, placeholders: new Dictionary<string, string>
             {
-                {"Time", message}
+                { "Time", formattedTime }
             });
         }
 
@@ -2776,18 +2842,27 @@ namespace Oxide.Plugins
                 {
                     inactiveParticipants.Remove(player.userID);
 
-                    string message = $"{player.displayName}, you have rejoined the tournament! Your previous score has been restored.";
+                    var tokens = new Dictionary<string, string>
+                    {
+                        { "PlayerName", player.displayName },
+                        { "Score", existingParticipant.Score.ToString() },
+                        { "PenaltyPoints", Configuration.PenaltyPointsOnExit.ToString() }
+                    };
+
+                    string messageKey = Configuration.PenaltyPointsOnExit > 0 ? "RejoinedWithPenalty" : "RejoinedNoPenalty";
+                    string message = Lang(messageKey, player, tokens);
                     SendPlayerMessage(player, message);
+
                     LogEvent($"{player.displayName} rejoined the tournament with existing score: {existingParticipant.Score}.");
                 }
                 else
                 {
-                    string message = Configuration.MessageTemplates.TryGetValue("AlreadyParticipating", out var alreadyTemplate)
-                        ? FormatMessage(alreadyTemplate, new Dictionary<string, string>
-                        {
-                            { "PlayerName", player.displayName }
-                        })
-                        : $"{player.displayName}, you are already in the tournament.";
+                    var tokens = new Dictionary<string, string>
+                    {
+                        { "PlayerName", player.displayName }
+                    };
+
+                    string message = Lang("AlreadyParticipating", player, tokens);
                     SendPlayerMessage(player, message);
                 }
             }
@@ -2797,24 +2872,25 @@ namespace Oxide.Plugins
                 participantsData[player.userID] = newParticipant;
                 SaveParticipantsData();
 
-                string message = Configuration.MessageTemplates.TryGetValue("JoinTournament", out var joinTemplate)
-                    ? FormatMessage(joinTemplate, new Dictionary<string, string>
-                    {
-                        { "PlayerName", player.displayName }
-                    })
-                    : $"{player.displayName} has joined the tournament.";
-                
+                var tokens = new Dictionary<string, string>
+                {
+                    { "PlayerName", player.displayName }
+                };
+
+                string message = Lang("JoinTournament", player, tokens);
                 SendTournamentMessage(message);
-                
+
                 if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
                 {
-                    SendDiscordMessage(message);
+                    SendDiscordMessage(Lang("JoinTournament", null, tokens));
                 }
 
                 LogEvent($"{player.displayName} joined the tournament as a new participant.");
             }
 
+            if (!participants.Contains(player.userID))
             participants.Add(player.userID);
+
         }
 
         [ChatCommand("exit_tournament")]
@@ -2822,13 +2898,14 @@ namespace Oxide.Plugins
         {
             if (!participantsData.TryGetValue(player.userID, out var participant))
             {
-                string message = Configuration.MessageTemplates.TryGetValue("NotInTournament", out var notInTemplate)
-                    ? FormatMessage(notInTemplate, new Dictionary<string, string>
-                    {
-                        { "PlayerName", player.displayName }
-                    })
-                    : $"{player.displayName}, you are not part of the tournament.";
+                var tokens = new Dictionary<string, string>
+                {
+                    { "PlayerName", player.displayName }
+                };
+
+                string message = Lang("NotInTournament", player, tokens);
                 SendPlayerMessage(player, message);
+
                 return;
             }
 
@@ -2847,24 +2924,26 @@ namespace Oxide.Plugins
                 Puts($"[Debug] {player.displayName} was penalized {penaltyAmount} points for exiting. Previous Score: {previousScore}, New Score: {participant.Score}");
                 LogEvent($"{player.displayName} left the tournament and was penalized {penaltyAmount} points (from {previousScore} to {participant.Score}).");
 
-                leaveMessage = Configuration.MessageTemplates.TryGetValue("LeaveTournamentPenalty", out var penaltyTemplate)
-                    ? FormatMessage(penaltyTemplate, new Dictionary<string, string>
-                    {
-                        { "PlayerName", player.displayName },
-                        { "PenaltyPoints", penaltyAmount.ToString() }
-                    })
-                    : $"{player.displayName} left the tournament and lost {penaltyAmount} points!";
+                var tokens = new Dictionary<string, string>
+                {
+                    { "PlayerName", player.displayName },
+                    { "PenaltyPoints", penaltyAmount.ToString() }
+                };
+
+                leaveMessage = Lang("LeaveTournamentPenalty", player, tokens);
+
             }
             else
             {
                 LogEvent($"{player.displayName} left the tournament (no penalty applied).");
 
-                leaveMessage = Configuration.MessageTemplates.TryGetValue("LeaveTournament", out var leaveTemplate)
-                    ? FormatMessage(leaveTemplate, new Dictionary<string, string>
-                    {
-                        { "PlayerName", player.displayName }
-                    })
-                    : $"{player.displayName} has left the tournament.";
+                var tokens = new Dictionary<string, string>
+                {
+                    { "PlayerName", player.displayName }
+                };
+
+                leaveMessage = Lang("LeaveTournament", player, tokens);
+
             }
 
             SaveParticipantsData();
@@ -2875,6 +2954,11 @@ namespace Oxide.Plugins
         [ChatCommand("open_tournament")]
         private void OpenTournamentCommand(BasePlayer player, string command, string[] args)
         {
+            var tokens = new Dictionary<string, string>
+            {
+                { "PlayerName", player.displayName }
+            };
+
             if (participantsData.TryGetValue(player.userID, out var existingParticipant))
             {
                 if (inactiveParticipants.Remove(player.userID))
@@ -2882,16 +2966,16 @@ namespace Oxide.Plugins
                     Puts($"[Debug] {player.displayName} ({player.userID}) re‑enabled from inactive list.");
                     SaveParticipantsData();
 
-                    string reactivateMsg = $"{player.displayName}, you’ve re‑joined the tournament. Welcome back!";
+                    string reactivateMsg = Lang("ReactivatedTournament", player, tokens);
                     SendPlayerMessage(player, reactivateMsg);
+
                     LogEvent($"{player.displayName} reactivated entry in the tournament.");
                 }
                 else
                 {
                     Puts($"[Debug] {player.displayName} ({player.userID}) attempted to opt‑in but is already active.");
-                    string alreadyMsg = Configuration.MessageTemplates.TryGetValue("AlreadyOptedIn", out var tmp)
-                        ? FormatMessage(tmp, new Dictionary<string,string>{{"PlayerName", player.displayName}})
-                        : $"{player.displayName}, you are already opted into the tournament.";
+
+                    string alreadyMsg = Lang("AlreadyOptedIn", player, tokens);
                     SendPlayerMessage(player, alreadyMsg);
                 }
                 return;
@@ -2905,9 +2989,7 @@ namespace Oxide.Plugins
             Puts($"[Debug] {player.displayName} ({player.userID}) added to participantsData and openTournamentPlayers.");
             SaveParticipantsData();
 
-            string successMsg = Configuration.MessageTemplates.TryGetValue("JoinTournament", out var joinTpl)
-                ? FormatMessage(joinTpl, new Dictionary<string,string>{{"PlayerName", player.displayName}})
-                : $"{player.displayName} has successfully opted into the tournament.";
+            string successMsg = Lang("OptedInTournament", player, tokens);
             SendPlayerMessage(player, successMsg);
 
             LogEvent($"{player.displayName} opted into the tournament.");
@@ -2916,6 +2998,11 @@ namespace Oxide.Plugins
         [ChatCommand("close_tournament")]
         private void CloseTournamentCommand(BasePlayer player, string command, string[] args)
         {
+            var tokens = new Dictionary<string, string>
+            {
+                { "PlayerName", player.displayName }
+            };
+
             if (participantsData.ContainsKey(player.userID))
             {
                 inactiveParticipants.Add(player.userID);
@@ -2925,12 +3012,7 @@ namespace Oxide.Plugins
 
                 Puts($"[Debug] {player.displayName} ({player.userID}) marked inactive from participantsData and added to auto-enroll blacklist.");
 
-                string message = Configuration.MessageTemplates.TryGetValue("OptedOutTournament", out var optedOutTemplate)
-                    ? FormatMessage(optedOutTemplate, new Dictionary<string, string>
-                    {
-                        { "PlayerName", player.displayName }
-                    })
-                    : $"{player.displayName} has opted out of the tournament.";
+                string message = Lang("OptedOutTournament", player, tokens);
                 SendPlayerMessage(player, message);
 
                 LogEvent($"{player.displayName} opted out of the tournament.");
@@ -2940,12 +3022,8 @@ namespace Oxide.Plugins
                 Puts($"[Debug] {player.displayName} ({player.userID}) was not found in participantsData.");
                 Puts($"[Debug] Current participantsData: {string.Join(", ", participantsData.Keys.Select(id => $"{id} ({GetPlayerName(id)})"))}");
 
-                string message = Configuration.MessageTemplates.TryGetValue("NotInTournament", out var notInTournamentTemplate)
-                    ? FormatMessage(notInTournamentTemplate, new Dictionary<string, string>
-                    {
-                        { "PlayerName", player.displayName }
-                    })
-                    : $"{player.displayName}, you are not part of the tournament.";
+
+                string message = Lang("NotInTournament", player, tokens);
                 SendPlayerMessage(player, message);
             }
         }
@@ -2961,13 +3039,16 @@ namespace Oxide.Plugins
 
                 string topScorerMessage = participants.Any()
                     ? $"{participants.First().Name} with {participants.First().Score} points"
-                    : "No participants yet.";
+                    : Lang("NoTopScorer", player);
 
                 string totalParticipants = participants.Count.ToString();
 
-                var message = $"{timeRemainingMessage}\n" +
-                            $"Total participants at this time: {totalParticipants}\n" +
-                            $"Current top scorer: {topScorerMessage}";
+                var message = Lang("TournamentStatusActive", player, new Dictionary<string, string>
+                {
+                    { "TimeRemaining", timeRemainingMessage },
+                    { "TotalParticipants", totalParticipants },
+                    { "TopScorer", topScorerMessage }
+                });
 
                 SendPlayerMessage(player, message);
             }
@@ -2977,8 +3058,10 @@ namespace Oxide.Plugins
                     ? FormatTimeRemaining(tournamentStartTime - DateTime.UtcNow)
                     : "N/A";
 
-                var message = "The tournament has not started yet.\n" +
-                            $"Next tournament starts in: {timeRemainingToStart}";
+                var message = Lang("TournamentStatusInactive", player, new Dictionary<string, string>
+                {
+                    { "TimeUntilStart", timeRemainingToStart }
+                });
 
                 SendPlayerMessage(player, message);
             }
@@ -2996,7 +3079,7 @@ namespace Oxide.Plugins
             catch (Exception ex)
             {
                 PrintError($"[Error] Failed to display scores: {ex.Message}");
-                SendPlayerMessage(player, "An error occurred while fetching scores. Please try again later.");
+                SendPlayerMessage(player, Lang("ScoreFetchError", player));
             }
         }
         
@@ -3018,7 +3101,7 @@ namespace Oxide.Plugins
             if (!participantsData.Any())
             {
                 Puts("[Debug] No participants found to display scores.");
-                SendPlayerMessage(player, "No scores are available at the moment. Join the tournament to compete!");
+                SendPlayerMessage(player, Lang("NoScoresAvailable", player));
                 return;
             }
 
@@ -3068,14 +3151,14 @@ namespace Oxide.Plugins
                 .ToList();
 
             var sb = new StringBuilder();
-            sb.AppendLine("Top Players:");
+            sb.AppendLine(Lang("TopPlayersHeader", player));
             for (int i = 0; i < topPlayers.Count; i++)
                 sb.AppendLine($"{i + 1}. {topPlayers[i].Name} ({topPlayers[i].Score} pts)");
 
             if (topClans.Count > 0)
             {
                 sb.AppendLine();
-                sb.AppendLine("Top Clans/Groups:");
+                sb.AppendLine(Lang("TopClansHeader", player));
                 for (int i = 0; i < topClans.Count; i++)
                 {
                     string displayName = groupNames.ContainsKey(topClans[i].Key) ? groupNames[topClans[i].Key] : topClans[i].Key;
@@ -3107,7 +3190,7 @@ namespace Oxide.Plugins
 
                 ApplyConfiguration();
 
-                SendPlayerMessage(player, "Configuration has been reloaded successfully and applied.");
+                SendPlayerMessage(player, Lang("ConfigReloaded", player));
 
                 Puts($"[Debug] Configuration reloaded successfully by {player.displayName} ({player.UserIDString}).");
 
@@ -3123,7 +3206,7 @@ namespace Oxide.Plugins
             catch (Exception ex)
             {
                 PrintError($"Failed to reload configuration: {ex.Message}");
-                SendPlayerMessage(player, "Failed to reload configuration. Check the server logs for details.");
+                SendPlayerMessage(player, Lang("ConfigReloadFailed", player));
             }
         }
 
@@ -3199,13 +3282,13 @@ namespace Oxide.Plugins
 
             if (!isTournamentRunning)
             {
-                SendPlayerMessage(player, "No tournament is currently running.");
+                SendPlayerMessage(player, Lang("NoTournamentRunning", player));
                 return;
             }
 
             EndTournament();
 
-            SendPlayerMessage(player, "Tournament has been ended manually.");
+            SendPlayerMessage(player, Lang("TournamentEndedManually", player));
             Puts($"[Debug] Tournament manually ended by {player.displayName} ({player.UserIDString}).");
         }
 
@@ -3213,7 +3296,7 @@ namespace Oxide.Plugins
         private void ShowRulesCommand(BasePlayer player, string command, string[] args)
         {
             var sb = new StringBuilder();
-            sb.AppendLine("Tournament Scoring Rules:");
+            sb.AppendLine(Lang("RulesHeader", player));
 
             foreach (var kvp in Configuration.ScoreRules)
             {
@@ -3231,7 +3314,7 @@ namespace Oxide.Plugins
                 sb.AppendLine(line);
             }
 
-            sb.AppendLine("\n Kit Prices:");
+            sb.AppendLine("\n" + Lang("KitPricesHeader", player));
             foreach (var kit in Configuration.KitPrices)
                 sb.AppendLine($"• {kit.Key}: {kit.Value} points");
 
@@ -3276,7 +3359,7 @@ namespace Oxide.Plugins
                 .Where(cmd => !restrictedCommands.Contains(cmd) || HasAdminPermission(player))
                 .ToList();
 
-            var helpText = "Available Commands:\n";
+            var helpText = Lang("HelpCommandHeader", player) + "\n";
             foreach (var commandName in availableCommands)
             {
                 if (commandDescriptions.TryGetValue(commandName, out var description))
