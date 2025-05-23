@@ -44,5 +44,15 @@
   "NoScoresAvailable": "No scores are available at the moment. Join the tournament to compete!",
   "ConfigReloaded": "Configuration has been reloaded successfully and applied.",
   "ConfigReloadFailed": "Failed to reload configuration. Check the server logs for details.",
-  "TournamentEndedManually": "Tournament has been ended manually."
+  "TournamentEndedManually": "Tournament has been ended manually.",
+  "RulesHeader": "Tournament Scoring Rules:",
+  "KitPricesHeader": "Kit Prices:",
+  "HelpCommandHeader": "Available Commands:",
+  "TopPlayersHeader": "Top Players:",
+  "TopClansHeader": "Top Clans/Groups:",
+  "NoScoresInTournament": "No participants scored points in this tournament.",
+  "ConfigSave": "Save & Reload",
+  "ConfigCancel": "Cancel",
+  "ConfigUpdated": "Updated {Key} = {Value}",
+  "ConfigParseError": "Failed to parse {Key}: {Error}"
 }
