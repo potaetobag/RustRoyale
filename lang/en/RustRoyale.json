@@ -37,6 +37,12 @@
   "AutoEnrolled": "You have been automatically enrolled into the RustRoyale tournament system. You can opt out by entering /close_tournament.",
   "NoTournamentRunning": "No tournament is currently running.",
   "TimeRemaining": "Time remaining in the tournament: {Time}.",
-  "RejoinedTournament": "{PlayerName}, you have rejoined the tournament! Your previous score has been restored."
-
+  "RejoinedNoPenalty": "{PlayerName}, you have rejoined the tournament! Your previous score of {Score} has been restored. No penalty was applied.",
+  "RejoinedWithPenalty": "{PlayerName}, you have rejoined the tournament! Your previous score of {Score} has been restored. A penalty of {PenaltyPoints} has been applied.",
+  "ReactivatedTournament": "{PlayerName}, you’ve rejoined the tournament. Welcome back!",
+  "ScoreFetchError": "An error occurred while fetching scores. Please try again later.",
+  "NoScoresAvailable": "No scores are available at the moment. Join the tournament to compete!",
+  "ConfigReloaded": "Configuration has been reloaded successfully and applied.",
+  "ConfigReloadFailed": "Failed to reload configuration. Check the server logs for details.",
+  "TournamentEndedManually": "Tournament has been ended manually."
 }
