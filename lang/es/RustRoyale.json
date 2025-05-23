@@ -25,5 +25,8 @@
   "TournamentAboutToStart": "¡El torneo está por comenzar! Inscríbete ahora para participar.",
   "TournamentCountdown": "¡El torneo comienza pronto! Quedan {Time} para unirte.",
   "LeaveTournamentPenalty": "{PlayerName} abandonó el torneo y perdió {PenaltyPoints} puntos.",
-  "TournamentWinners": "¡El torneo ha terminado! Aquí están los ganadores:\n{PlayerList}"
+  "TournamentWinners": "¡El torneo ha terminado! Aquí están los ganadores:\n{PlayerList}",
+  "TournamentStatusActive": "{TimeRemaining}\nTotal de participantes en este momento: {TotalParticipants}\nPuntaje más alto: {TopScorer}",
+  "TournamentStatusInactive": "El torneo no ha comenzado todavía.\nEl próximo torneo comienza en: {TimeUntilStart}",
+  "NoTopScorer": "Aún no hay participantes."
 }
