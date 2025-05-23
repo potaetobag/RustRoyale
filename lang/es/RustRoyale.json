@@ -24,5 +24,6 @@
   "NoScores": "Aún no hay puntajes. ¡Únete al torneo y haz historia!",
   "TournamentAboutToStart": "¡El torneo está por comenzar! Inscríbete ahora para participar.",
   "TournamentCountdown": "¡El torneo comienza pronto! Quedan {Time} para unirte.",
-  "LeaveTournamentPenalty": "{PlayerName} abandonó el torneo y perdió {PenaltyPoints} puntos."
+  "LeaveTournamentPenalty": "{PlayerName} abandonó el torneo y perdió {PenaltyPoints} puntos.",
+  "TournamentWinners": "¡El torneo ha terminado! Aquí están los ganadores:\n{PlayerList}"
 }
