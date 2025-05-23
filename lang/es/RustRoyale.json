@@ -33,6 +33,16 @@
   "WelcomeTitle": "<b>¡Bienvenido a RustRoyale!</b>",
   "WelcomeDescription": "Prepárate para una experiencia intensa en Rust como ninguna otra. RustRoyale es un torneo competitivo que recompensa la habilidad, la estrategia y el instinto de supervivencia. Gana puntos eliminando a otros jugadores, acabando con NPCs y demostrando tu puntería a larga distancia. Pero cuidado: morir—especialmente por trampas o NPCs descuidados—te costará puntos. Afila tus armas, únete a un equipo o juega solo, ¡y reclama tu lugar en la cima del ranking!",
   "WelcomeDiscord": "Únete a nuestro canal de Discord para novedades: https://discord.gg/y2v4RaKP",
-  "ScheduleMessage": "¡Atención, guerreros! El torneo comienza a las {StartTime} ({Timezone}) y durará {Duration} horas. Ya hay {ActiveCount} héroes listos para la batalla. ¡Si aún no te has unido, escribe /open_tournament y únete a la lucha!"
-
+  "ScheduleMessage": "¡Atención, guerreros! El torneo comienza a las {StartTime} ({Timezone}) y durará {Duration} horas. Ya hay {ActiveCount} héroes listos para la batalla. ¡Si aún no te has unido, escribe /open_tournament y únete a la lucha!",
+  "AutoEnrolled": "Has sido inscrito automáticamente en el sistema de torneo de RustRoyale. Puedes salir usando /close_tournament.",
+  "NoTournamentRunning": "Ningún torneo está en curso.",
+  "TimeRemaining": "Tiempo restante del torneo: {Time}.",
+  "RejoinedNoPenalty": "{PlayerName}, ¡te has reincorporado al torneo! Tu puntuación anterior de {Score} ha sido restaurada. No se aplicó ninguna penalización.",
+  "RejoinedWithPenalty": "{PlayerName}, ¡te has reincorporado al torneo! Tu puntuación anterior de {Score} ha sido restaurada. Se ha aplicado una penalización de {PenaltyPoints} puntos.",
+  "ReactivatedTournament": "{PlayerName}, te has reincorporado al torneo. ¡Bienvenido de nuevo!",
+  "ScoreFetchError": "Ocurrió un error al obtener las puntuaciones. Por favor, inténtalo de nuevo más tarde.",
+  "NoScoresAvailable": "No hay puntuaciones disponibles en este momento. ¡Únete al torneo para competir!",
+  "ConfigReloaded": "La configuración se ha recargado correctamente y se ha aplicado.",
+  "ConfigReloadFailed": "No se pudo recargar la configuración. Consulta los registros del servidor para más detalles.",
+  "TournamentEndedManually": "El torneo ha sido finalizado manualmente."
 }
