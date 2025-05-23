@@ -44,5 +44,15 @@
   "NoScoresAvailable": "No hay puntuaciones disponibles en este momento. ¡Únete al torneo para competir!",
   "ConfigReloaded": "La configuración se ha recargado correctamente y se ha aplicado.",
   "ConfigReloadFailed": "No se pudo recargar la configuración. Consulta los registros del servidor para más detalles.",
-  "TournamentEndedManually": "El torneo ha sido finalizado manualmente."
+  "TournamentEndedManually": "El torneo ha sido finalizado manualmente.",
+  "RulesHeader": "Reglas de puntuación del torneo:",
+  "KitPricesHeader": "Precios de kits:",
+  "HelpCommandHeader": "Comandos disponibles:",
+  "TopPlayersHeader": "Mejores jugadores:",
+  "TopClansHeader": "Mejores clanes/grupos:",
+  "NoScoresInTournament": "Ningún participante obtuvo puntos en este torneo.",
+  "ConfigSave": "Guardar y recargar",
+  "ConfigCancel": "Cancelar",
+  "ConfigUpdated": "Actualizado {Key} = {Value}",
+  "ConfigParseError": "Error al analizar {Key}: {Error}"
 }
