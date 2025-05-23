@@ -33,6 +33,10 @@
   "WelcomeTitle": "<b>Welcome to RustRoyale!</b>",
   "WelcomeDescription": "Get ready for an adrenaline-pumping Rust experience like no other. RustRoyale is a competitive tournament that rewards skill, strategy, and survival instincts. Earn points by taking down other players, eliminating NPC threats, and showing off your long-range hunting skills. But be warned—deaths, especially from traps or careless encounters with NPCs, will cost you. Sharpen your weapons, team up or go solo, and claim your spot at the top of the leaderboard!",
   "WelcomeDiscord": "Join our Discord channel for updates: https://discord.gg/y2v4RaKP",
-  "ScheduleMessage": "Heads up, warriors! The tournament kicks off at {StartTime} ({Timezone}) and will rage for {Duration} hours. Already, {ActiveCount} heroes have signed up to battle it out. If you’re not in yet, type /open_tournament and join the fray!"
+  "ScheduleMessage": "Heads up, warriors! The tournament kicks off at {StartTime} ({Timezone}) and will rage for {Duration} hours. Already, {ActiveCount} heroes have signed up to battle it out. If you’re not in yet, type /open_tournament and join the fray!",
+  "AutoEnrolled": "You have been automatically enrolled into the RustRoyale tournament system. You can opt out by entering /close_tournament.",
+  "NoTournamentRunning": "No tournament is currently running.",
+  "TimeRemaining": "Time remaining in the tournament: {Time}.",
+  "RejoinedTournament": "{PlayerName}, you have rejoined the tournament! Your previous score has been restored."
 
 }
