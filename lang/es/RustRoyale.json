@@ -28,5 +28,6 @@
   "TournamentWinners": "¡El torneo ha terminado! Aquí están los ganadores:\n{PlayerList}",
   "TournamentStatusActive": "{TimeRemaining}\nTotal de participantes en este momento: {TotalParticipants}\nPuntaje más alto: {TopScorer}",
   "TournamentStatusInactive": "El torneo no ha comenzado todavía.\nEl próximo torneo comienza en: {TimeUntilStart}",
-  "NoTopScorer": "Aún no hay participantes."
+  "NoTopScorer": "Aún no hay participantes.",
+  "OptedInTournament": "{PlayerName} se ha inscrito exitosamente en el torneo."
 }
