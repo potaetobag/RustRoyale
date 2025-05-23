@@ -29,5 +29,8 @@
   "TournamentStatusActive": "{TimeRemaining}\nTotal de participantes en este momento: {TotalParticipants}\nPuntaje más alto: {TopScorer}",
   "TournamentStatusInactive": "El torneo no ha comenzado todavía.\nEl próximo torneo comienza en: {TimeUntilStart}",
   "NoTopScorer": "Aún no hay participantes.",
-  "OptedInTournament": "{PlayerName} se ha inscrito exitosamente en el torneo."
+  "OptedInTournament": "{PlayerName} se ha inscrito exitosamente en el torneo.",
+  "WelcomeTitle": "<b>¡Bienvenido a RustRoyale!</b>",
+  "WelcomeDescription": "Prepárate para una experiencia intensa en Rust como ninguna otra. RustRoyale es un torneo competitivo que recompensa la habilidad, la estrategia y el instinto de supervivencia. Gana puntos eliminando a otros jugadores, acabando con NPCs y demostrando tu puntería a larga distancia. Pero cuidado: morir—especialmente por trampas o NPCs descuidados—te costará puntos. Afila tus armas, únete a un equipo o juega solo, ¡y reclama tu lugar en la cima del ranking!",
+  "WelcomeDiscord": "Únete a nuestro canal de Discord para novedades: https://discord.gg/y2v4RaKP"
 }
