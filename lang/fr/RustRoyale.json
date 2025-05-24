@@ -36,7 +36,6 @@
   "ScheduleMessage": "À vos marques ! Le tournoi commence à {StartTime} ({Timezone}) et durera {Duration} heures. Déjà {ActiveCount} héros sont prêts à se battre. Si tu n’es pas encore inscrit, tape /open_tournament et rejoins-nous !",
   "AutoEnrolled": "Tu as été automatiquement inscrit au tournoi RustRoyale. Tu peux te retirer avec la commande /close_tournament.",
   "NoTournamentRunning": "Aucun tournoi n'est actuellement en cours.",
-  "TimeRemaining": "Temps restant dans le tournoi : {Time}.",
   "RejoinedNoPenalty": "{PlayerName}, tu as rejoint le tournoi ! Ton score précédent de {Score} a été restauré. Aucune pénalité appliquée.",
   "RejoinedWithPenalty": "{PlayerName}, tu as rejoint le tournoi ! Ton score précédent de {Score} a été restauré. Une pénalité de {PenaltyPoints} points a été appliquée.",
   "ReactivatedTournament": "{PlayerName}, tu es de retour dans le tournoi. Bon retour !",
