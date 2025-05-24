@@ -36,7 +36,6 @@
   "ScheduleMessage": "¡Atención, guerreros! El torneo comienza a las {StartTime} ({Timezone}) y durará {Duration} horas. Ya hay {ActiveCount} héroes listos para la batalla. ¡Si aún no te has unido, escribe /open_tournament y únete a la lucha!",
   "AutoEnrolled": "Has sido inscrito automáticamente en el sistema de torneo de RustRoyale. Puedes salir usando /close_tournament.",
   "NoTournamentRunning": "Ningún torneo está en curso.",
-  "TimeRemaining": "Tiempo restante del torneo: {Time}.",
   "RejoinedNoPenalty": "{PlayerName}, ¡te has reincorporado al torneo! Tu puntuación anterior de {Score} ha sido restaurada. No se aplicó ninguna penalización.",
   "RejoinedWithPenalty": "{PlayerName}, ¡te has reincorporado al torneo! Tu puntuación anterior de {Score} ha sido restaurada. Se ha aplicado una penalización de {PenaltyPoints} puntos.",
   "ReactivatedTournament": "{PlayerName}, te has reincorporado al torneo. ¡Bienvenido de nuevo!",
