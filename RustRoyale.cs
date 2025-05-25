@@ -16,12 +16,13 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.2.6"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.2.7"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
+        private bool initialized = false;
         private const string ConfigUiPanelName = "RustRoyale_Config_UI";
         private int _langDownloadsCompleted = 0;
-        private const int RequiredLangDownloads = 2;
+        private const int RequiredLangDownloads = 3;
         private readonly Dictionary<string, string> pendingConfig = new Dictionary<string, string>();
         private readonly Dictionary<ulong, int> npcKillCounts = new();
         private readonly Dictionary<ulong, int> animalKillCounts = new();
@@ -261,12 +262,18 @@ namespace Oxide.Plugins
             return Configuration.DefaultLanguage;
         }
 
-        private string Lang(string key, BasePlayer player = null, Dictionary<string, string> tokens = null)
+        private string Lang(string key, BasePlayer player = null, Dictionary<string, string> tokens = null, string langOverride = null)
         {
-            var lang = player != null ? GetPlayerLang(player) : Configuration.DefaultLanguage;
+            string lang = langOverride ?? (player != null ? GetPlayerLang(player) : Configuration.DefaultLanguage);
 
             if (!Translations.TryGetValue(lang, out var dict) || !dict.TryGetValue(key, out var message))
-                message = Translations["en"].TryGetValue(key, out var fallback) ? fallback : key;
+            {
+                if (!Translations.TryGetValue("en", out var fallbackDict) || !fallbackDict.TryGetValue(key, out message))
+                {
+                    Puts($"[Warning] Missing translation key '{key}' in '{lang}' and fallback 'en'");
+                    return key;
+                }
+            }
 
             if (tokens != null)
             {
@@ -714,11 +721,37 @@ namespace Oxide.Plugins
             AddToggle("Auto-Start Tournament", "AutoStartEnabled", Configuration.AutoStartEnabled, xLeftLabel, xLeftInput + 0.02f, y); y -= 0.05f;
 
             float toggleY = 0.81f;
+            
+            string currentLang = Configuration.DefaultLanguage;
+            int currentIndex = Array.IndexOf(SupportedLanguages, currentLang);
+            int nextIndex = (currentIndex + 1) % SupportedLanguages.Length;
+            string nextLang = SupportedLanguages[nextIndex];
+
+            container.Add(new CuiLabel
+            {
+                RectTransform = { AnchorMin = $"{xRightLabel} {toggleY}", AnchorMax = $"{xRightLabel + 0.2f} {toggleY + 0.035f}" },
+                Text = { Text = "Default Language", FontSize = 13, Align = TextAnchor.MiddleCenter }
+            }, $"{ConfigUiPanelName}.main");
+
+            container.Add(new CuiButton
+            {
+                Button = {
+                    Color = "0.2 0.4 0.8 1",
+                    Command = $"config_set DefaultLanguage {nextLang}"
+                },
+                RectTransform = { AnchorMin = $"{xRightInput + 0.02f} {toggleY}", AnchorMax = $"{xRightInput + 0.22f} {toggleY + 0.035f}" },
+                Text = { Text = currentLang, FontSize = 13, Align = TextAnchor.MiddleCenter }
+            }, $"{ConfigUiPanelName}.main");
+
+            toggleY -= 0.05f;
+
 
             AddToggle("Auto-Enroll Players", "AutoEnrollEnabled", Configuration.AutoEnrollEnabled, xRightLabel, xRightInput + 0.02f, toggleY); toggleY -= 0.05f;
             AddToggle("Penalize Players Who Leave", "PenaltyOnExitEnabled", Configuration.PenaltyOnExitEnabled, xRightLabel, xRightInput + 0.02f, toggleY); toggleY -= 0.05f;
+            
+            y -= 0.05f;
 
-            float groupY = 0.70f;
+            float groupY = 0.66f;
 
             foreach (var kv in Configuration.ScoreRules)
             {
@@ -841,12 +874,30 @@ namespace Oxide.Plugins
         {
             var player = arg.Player();
             if (player == null || !HasAdminPermission(player)) return;
+
             var args = arg.Args;
-            if (args.Length < 2) return;
+            if (args.Length < 1) return;
 
             string key = args[0];
+
+            if (key == "DefaultLanguage")
+            {
+                string current = Configuration.DefaultLanguage;
+                int currentIndex = Array.IndexOf(SupportedLanguages, current);
+                int nextIndex = (currentIndex + 1) % SupportedLanguages.Length;
+                string next = SupportedLanguages[nextIndex];
+
+                Configuration.DefaultLanguage = next;
+                player.ChatMessage($"<color=#ffd479>RustRoyale:</color> Default language changed to: {next}");
+
+                ShowConfigUI(player);
+                return;
+            }
+
+            if (args.Length < 2) return;
             string val = string.Join(" ", args.Skip(1));
             pendingConfig[key] = val;
+
             player.ChatMessage($"<color=#ffd479>RustRoyale:</color> Set {key} → {val}");
         }
         
@@ -954,11 +1005,16 @@ namespace Oxide.Plugins
 
             EnsureLatestLangFile("en");
             EnsureLatestLangFile("es");
+            EnsureLatestLangFile("fr");
+
+            initialized = false;
         }
-        
+
         private void ContinueInitialization()
         {
             LoadTranslations();
+            initialized = true;
+
             LoadWelcomeOptOut();
             ValidateConfiguration();
             NormaliseKitPrices();
@@ -1100,7 +1156,7 @@ namespace Oxide.Plugins
         }
         
         private Dictionary<string, Dictionary<string, string>> Translations = new();
-        private readonly string[] SupportedLanguages = new[] { "en", "es" };
+        private readonly string[] SupportedLanguages = new[] { "en", "es", "fr" };
 
         private void LoadTranslations()
         {
@@ -1764,6 +1820,9 @@ namespace Oxide.Plugins
 
         private void OnPlayerInit(BasePlayer player)
         {
+            if (!initialized)
+                return;
+
             if (!playerLanguages.ContainsKey(player.userID))
             {
                 string lang = player.net?.connection?.info?.GetString("lang")?.ToLower();
@@ -1774,7 +1833,7 @@ namespace Oxide.Plugins
                     Puts($"[Debug] Detected language '{lang}' for {player.displayName}.");
                 }
             }
-            
+
             if (player == null || string.IsNullOrEmpty(player.displayName))
                 return;
 
@@ -2110,26 +2169,29 @@ namespace Oxide.Plugins
 
             return false;
         }
+		
+		private bool HandleNpcKilledByTrap(BasePlayer victim, BaseCombatEntity entity, HitInfo info)
+		{
+			if (!victim.IsNpc || entity == null) return false;
 
-        private bool HandleNpcKilledByTrap(BasePlayer victim, BaseCombatEntity entity, HitInfo info)
-        {
-            if (!victim.IsNpc || entity == null) return false;
+			ulong ownerId = entity.OwnerID;
+			if (ownerId == 0 || !participants.Contains(ownerId)) return false;
 
-            ulong ownerId = entity.OwnerID;
-            if (ownerId == 0 || !participants.Contains(ownerId)) return false;
+			if (HasReachedKillCap(npcKillCounts, ownerId, Configuration.NpcKillCap, "NPC", BasePlayer.FindByID(ownerId)))
+				return false;
 
-            string trapName = GetFriendlyTrapName(entity.ShortPrefabName ?? "Unknown");
-            string npcName = GetFriendlyNpcName(victim.ShortPrefabName ?? "Unknown");
-            string ownerName = GetPlayerName(ownerId);
+			string trapName = GetFriendlyTrapName(entity.ShortPrefabName ?? "Unknown");
+			string npcName = GetFriendlyNpcName(victim.ShortPrefabName ?? "Unknown");
+			string ownerName = GetPlayerName(ownerId);
 
-            if (Configuration.ScoreRules.TryGetValue("NPC", out int points))
-            {
-                UpdatePlayerScore(ownerId, "NPC", $"eliminating an NPC ({npcName}) with {trapName}", victim, info, attackerName: ownerName, entityName: npcName);
-                return true;
-            }
+			if (Configuration.ScoreRules.TryGetValue("NPC", out int points))
+			{
+				UpdatePlayerScore(ownerId, "NPC", $"eliminating an NPC ({npcName}) with {trapName}", victim, info, attackerName: ownerName, entityName: npcName);
+				return true;
+			}
 
-            return false;
-        }
+			return false;
+		}
 
         private bool HandleSelfInflicted(BasePlayer victim, BasePlayer attacker, HitInfo info)
         {
@@ -2160,8 +2222,12 @@ namespace Oxide.Plugins
             if (HandleDeathByBradleyOrHelicopter(entity, info)) return;
             if (HandleLongDistanceAnimalKill(entity, info)) return;
 
+            if (!IsAnimalKill(entity.ShortPrefabName) && !entity.ShortPrefabName.Contains("scientist"))
+                return;
+
             Puts($"[Debug] ❌ No OnEntityDeath handler matched for entity: {entity.ShortPrefabName}");
         }
+
         
         private bool HandleDeathByBradleyOrHelicopter(BaseCombatEntity entity, HitInfo info)
         {
@@ -2184,33 +2250,39 @@ namespace Oxide.Plugins
             Puts($"[Debug] {killer.displayName} earned {points} point(s) for downing a {entityType}.");
             return true;
         }
-        
-        private bool HandleLongDistanceAnimalKill(BaseCombatEntity entity, HitInfo info)
-        {
-            if (!IsAnimalKill(entity.ShortPrefabName))
-                return false;
+		
+		private bool HandleLongDistanceAnimalKill(BaseCombatEntity entity, HitInfo info)
+		{
+			if (!IsAnimalKill(entity.ShortPrefabName))
+				return false;
 
-            var killer = info?.InitiatorPlayer;
-            if (killer == null || !participants.Contains(killer.userID))
-                return false;
+			var killer = info?.InitiatorPlayer;
+			if (killer == null || !participants.Contains(killer.userID))
+				return false;
 
-            float distance = Vector3.Distance(killer.transform.position, entity.transform.position);
-            if (distance <= Configuration.AnimalKillDistance)
-                return false;
+			if (info?.Weapon == null || !(info.Weapon is BaseProjectile))
+			{
+				Puts($"[Debug] Ignored long-range animal kill by {killer.displayName} — not a projectile weapon.");
+				return false;
+			}
 
-            if (!Configuration.ScoreRules.TryGetValue("WHY", out int points))
-                return false;
+			float distance = Vector3.Distance(killer.transform.position, entity.transform.position);
+			if (distance <= Configuration.AnimalKillDistance)
+				return false;
 
-            string animalName = GetFriendlyAnimalName(entity.ShortPrefabName);
-            
-            if (HasReachedKillCap(animalKillCounts, killer.userID, Configuration.AnimalKillCap, "animal", killer))
-            return false;
+			if (!Configuration.ScoreRules.TryGetValue("WHY", out int points))
+				return false;
 
-            UpdatePlayerScore(killer.userID, "WHY", $"killing an animal ({animalName}) from {distance:F1} meters away", null, info, entityName: animalName, distance: distance);
+			if (HasReachedKillCap(animalKillCounts, killer.userID, Configuration.AnimalKillCap, "animal", killer))
+				return false;
 
-            Puts($"[Debug] Awarded {points} pt(s) to {killer.displayName} for {animalName} kill at {distance:F1} m");
-            return true;
-        }
+			string animalName = GetFriendlyAnimalName(entity.ShortPrefabName);
+
+			UpdatePlayerScore(killer.userID, "WHY", $"killing an animal ({animalName}) from {distance:F1} meters away", null, info, entityName: animalName, distance: distance);
+
+			Puts($"[Debug] Awarded {points} pt(s) to {killer.displayName} for {animalName} kill at {distance:F1} m");
+			return true;
+		}
     #endregion
     #region Kill Cap
         private bool HasReachedKillCap(Dictionary<ulong, int> tracker, ulong userId, int cap, string label, BasePlayer player = null)
@@ -2352,6 +2424,15 @@ namespace Oxide.Plugins
             {
                 EnsureDataDirectory();
 
+                lock (participantsDataLock)
+                {
+                    if (participantsData == null || participantsData.Count == 0)
+                    {
+                        PrintWarning("[SaveParticipantsData] Aborting save: No participants to write.");
+                        return;
+                    }
+                }
+
                 string serializedData;
                 lock (participantsDataLock)
                 {
@@ -2433,8 +2514,12 @@ namespace Oxide.Plugins
                 return;
             }
 
-            int previousScore = participant.Score;
-            participant.Score += points;
+            int previousScore;
+			lock (participantsDataLock)
+			{
+				previousScore = participant.Score;
+				participant.Score += points;
+			}
 
             Puts($"[Debug] {participant.Name} (UserID: {userId}) | Previous Score: {previousScore} | Gained: {points} | New Score: {participant.Score}");
 
@@ -2750,13 +2835,13 @@ namespace Oxide.Plugins
             bool pointsDeducted = false;
 
             lock (participantsDataLock)
-            {
-                if (participant.Score >= kitPrice)
-                {
-                    participant.Score -= kitPrice;
-                    pointsDeducted = true;
-                }
-            }
+			{
+				if (participant.Score >= kitPrice)
+				{
+					participant.Score -= kitPrice;
+					pointsDeducted = true;
+				}
+			}
 
             var tokens = new Dictionary<string, string>
             {
@@ -2783,7 +2868,7 @@ namespace Oxide.Plugins
                 SendTournamentMessage(debtMsg);
 
                 if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-                    SendDiscordMessage(Lang("KitPurchaseSuccess", null, tokens));
+                    SendDiscordMessage(Lang("KitPurchaseSuccess", null, tokens, "en"));
 
                 return;
             }
@@ -2795,7 +2880,7 @@ namespace Oxide.Plugins
             SendTournamentMessage(successMsg);
 
             if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-                SendDiscordMessage(Lang("KitPurchaseSuccess", null, tokens));
+                SendDiscordMessage(Lang("KitPurchaseSuccess", null, tokens, "en"));
 
             LogEvent($"{participant.Name} purchased kit '{kitName}' for {kitPrice} points. New Score: {participant.Score}");
         }
@@ -2869,7 +2954,10 @@ namespace Oxide.Plugins
             else
             {
                 var newParticipant = new PlayerStats(player.userID) { Name = player.displayName };
-                participantsData[player.userID] = newParticipant;
+                participantsData.AddOrUpdate(player.userID,
+					id => new PlayerStats(player.userID) { Name = player.displayName },
+					(id, existing) => existing);
+
                 SaveParticipantsData();
 
                 var tokens = new Dictionary<string, string>
@@ -2882,7 +2970,7 @@ namespace Oxide.Plugins
 
                 if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
                 {
-                    SendDiscordMessage(Lang("JoinTournament", null, tokens));
+                    SendDiscordMessage(Lang("JoinTournament", null, tokens, "en"));
                 }
 
                 LogEvent($"{player.displayName} joined the tournament as a new participant.");
@@ -2982,7 +3070,10 @@ namespace Oxide.Plugins
             }
 
             var newParticipant = new PlayerStats(player.userID) { Name = player.displayName };
-            participantsData[player.userID] = newParticipant;
+            participantsData.AddOrUpdate(player.userID,
+				id => new PlayerStats(player.userID) { Name = player.displayName },
+				(id, existing) => existing);
+
             inactiveParticipants.Remove(player.userID);
             openTournamentPlayers.Add(player.userID);
 
