@@ -1506,6 +1506,19 @@ namespace Oxide.Plugins
         }
     #endregion
     #region Tournament Logic
+        private int GetEffectiveScore(string actionCode)
+        {
+            if (!Configuration.ScoreRules.TryGetValue(actionCode, out int basePoints))
+                return 0;
+
+            return basePoints;
+        }
+        
+        private bool IsActionCodeDisabled(string actionCode)
+        {
+            return Configuration.ScoreRules.TryGetValue(actionCode, out int value) && value == 0;
+        }
+
         private void ResumeInterruptedTournament()
         {
             EnsureDataDirectory();
@@ -2068,18 +2081,23 @@ namespace Oxide.Plugins
 
         private bool HandleHeliOrBradleyKill(BasePlayer victim, BaseCombatEntity entity, HitInfo info)
         {
-            if (entity == null || !participants.Contains(victim.userID)) return false;
+            if (entity == null || !participants.Contains(victim.userID))
+                return false;
 
             string prefab = entity.ShortPrefabName ?? "";
-            if (!prefab.Contains("helicopter") && !prefab.Contains("bradley")) return false;
+            if (!prefab.Contains("helicopter") && !prefab.Contains("bradley"))
+                return false;
 
             string type = prefab.Contains("helicopter") ? "Helicopter" : "Bradley";
 
-            if (Configuration.ScoreRules.TryGetValue("BRUH", out int points))
-            {
-                UpdatePlayerScore(victim.userID, "BRUH", $"getting defeated by a {type}", victim, info, entityName: type);
-                Puts($"[Debug] {victim.displayName} lost points for being defeated by a {type}.");
-            }
+            if (IsActionCodeDisabled("BRUH"))
+                return false;
+
+            UpdatePlayerScore(victim.userID, "BRUH", $"getting defeated by a {type}", victim, info, entityName: type);
+
+            int finalPoints = GetEffectiveScore("BRUH");
+            Puts($"[Debug] {victim.displayName} lost {finalPoints} point(s) for being defeated by a {type}.");
+
             return true;
         }
 
@@ -2089,16 +2107,20 @@ namespace Oxide.Plugins
             bool isNpcKill = attacker != null && attacker.IsNpc;
             bool isUnownedEntity = entity != null && ownerId == 0 && (attacker == null || attacker.IsNpc);
 
-            if (!isNpcKill && !isUnownedEntity) return false;
+            if (!isNpcKill && !isUnownedEntity)
+                return false;
 
             string attackerName = attacker?.ShortPrefabName ?? entity?.ShortPrefabName ?? "Unknown";
             attackerName = GetFriendlyNpcName(attackerName);
 
-            if (participants.Contains(victim.userID) && Configuration.ScoreRules.TryGetValue("BRUH", out int points))
-            {
-                UpdatePlayerScore(victim.userID, "BRUH", $"being defeated by {attackerName}", victim, info, entityName: attackerName);
-                Puts($"[Debug] {victim.displayName} lost points for being defeated by {attackerName}.");
-            }
+            if (!participants.Contains(victim.userID) || IsActionCodeDisabled("BRUH"))
+                return false;
+
+            UpdatePlayerScore(victim.userID, "BRUH", $"being defeated by {attackerName}", victim, info, entityName: attackerName);
+
+            int finalPoints = GetEffectiveScore("BRUH");
+            Puts($"[Debug] {victim.displayName} lost {finalPoints} point(s) for being defeated by {attackerName}.");
+
             return true;
         }
 
@@ -2107,12 +2129,25 @@ namespace Oxide.Plugins
             if (attacker == null || !participants.Contains(attacker.userID) || !participants.Contains(victim.userID))
                 return false;
 
-            if (Configuration.ScoreRules.TryGetValue("DEAD", out int pointsForVictim) &&
-                Configuration.ScoreRules.TryGetValue("KILL", out int pointsForAttacker))
+            bool updated = false;
+
+            if (!IsActionCodeDisabled("DEAD"))
             {
-                UpdatePlayerScore(victim.userID, "DEAD", $"killed by {attacker.displayName}", victim);
-                UpdatePlayerScore(attacker.userID, "KILL", $"eliminated {victim.displayName}", victim);
-                Puts($"[Debug] {attacker.displayName} killed {victim.displayName}.");
+                UpdatePlayerScore(victim.userID, "DEAD", $"killed by {attacker.displayName}", victim, info);
+                updated = true;
+            }
+
+            if (!IsActionCodeDisabled("KILL"))
+            {
+                UpdatePlayerScore(attacker.userID, "KILL", $"eliminated {victim.displayName}", victim, info);
+                updated = true;
+            }
+
+            if (updated)
+            {
+                int deadPoints = GetEffectiveScore("DEAD");
+                int killPoints = GetEffectiveScore("KILL");
+                Puts($"[Debug] {attacker.displayName} killed {victim.displayName} (KILL +{killPoints}, DEAD -{deadPoints})");
             }
 
             return true;
@@ -2127,26 +2162,51 @@ namespace Oxide.Plugins
             ulong ownerId = entity.OwnerID;
             string ownerName = ownerId != 0 ? GetPlayerName(ownerId) : "Unknown";
 
-            if (ownerId == victim.userID && Configuration.ScoreRules.TryGetValue("BRUH", out int bruhPoints))
+            // Case 1: Player killed by their own trap
+            if (ownerId == victim.userID)
             {
-                UpdatePlayerScore(victim.userID, "BRUH", $"being defeated by their own {friendlyName}", victim, info, attackerName: ownerName, entityName: friendlyName);
-                return true;
+                if (!IsActionCodeDisabled("BRUH"))
+                {
+                    UpdatePlayerScore(victim.userID, "BRUH", $"being defeated by their own {friendlyName}", victim, info, attackerName: ownerName, entityName: friendlyName);
+                    int points = GetEffectiveScore("BRUH");
+                    Puts($"[Debug] {victim.displayName} lost {points} point(s) to their own {friendlyName}.");
+                    return true;
+                }
             }
 
+            // Case 2: Trap has a different owner who is a participant
             if (ownerId != 0 && participants.Contains(ownerId))
             {
-                if (Configuration.ScoreRules.TryGetValue("KILL", out int ptsAttacker) &&
-                    Configuration.ScoreRules.TryGetValue("DEAD", out int ptsVictim))
+                bool scored = false;
+
+                if (!IsActionCodeDisabled("DEAD"))
                 {
                     UpdatePlayerScore(victim.userID, "DEAD", $"being killed by {friendlyName} owned by {ownerName}", victim, info, attackerName: ownerName, entityName: friendlyName);
-                    UpdatePlayerScore(ownerId, "KILL", $"eliminating {victim.displayName} with {friendlyName}", victim, info, attackerName: ownerName, entityName: friendlyName, reverseMessage: true);
+                    scored = true;
                 }
+
+                if (!IsActionCodeDisabled("KILL"))
+                {
+                    UpdatePlayerScore(ownerId, "KILL", $"eliminating {victim.displayName} with {friendlyName}", victim, info, attackerName: ownerName, entityName: friendlyName, reverseMessage: true);
+                    scored = true;
+                }
+
+                if (scored)
+                {
+                    int killPts = GetEffectiveScore("KILL");
+                    int deadPts = GetEffectiveScore("DEAD");
+                    Puts($"[Debug] {ownerName} earned {killPts}, {victim.displayName} lost {deadPts} via {friendlyName}");
+                }
+
                 return true;
             }
 
-            if (Configuration.ScoreRules.TryGetValue("JOKE", out int jokePoints))
+            // Case 3: Unowned trap (or owner not a participant)
+            if (!IsActionCodeDisabled("JOKE"))
             {
                 UpdatePlayerScore(victim.userID, "JOKE", $"death caused by an unowned {friendlyName}", victim, info, entityName: friendlyName);
+                int points = GetEffectiveScore("JOKE");
+                Puts($"[Debug] {victim.displayName} lost {points} point(s) to an unowned {friendlyName}.");
                 return true;
             }
 
@@ -2158,40 +2218,48 @@ namespace Oxide.Plugins
             if (!victim.IsNpc || attacker == null || !participants.Contains(attacker.userID))
                 return false;
 
-            if (Configuration.ScoreRules.TryGetValue("NPC", out int points))
-            {
-                string npcName = GetFriendlyNpcName(victim.ShortPrefabName);
-                if (HasReachedKillCap(npcKillCounts, attacker.userID, Configuration.NpcKillCap, "NPC", attacker))
+            if (IsActionCodeDisabled("NPC"))
                 return false;
-                UpdatePlayerScore(attacker.userID, "NPC", $"eliminating an NPC ({npcName})", victim, info, entityName: npcName);
-                return true;
-            }
 
-            return false;
+            string npcName = GetFriendlyNpcName(victim.ShortPrefabName);
+
+            if (HasReachedKillCap(npcKillCounts, attacker.userID, Configuration.NpcKillCap, "NPC", attacker))
+                return false;
+
+            UpdatePlayerScore(attacker.userID, "NPC", $"eliminating an NPC ({npcName})", victim, info, entityName: npcName);
+
+            int finalPoints = GetEffectiveScore("NPC");
+            Puts($"[Debug] {attacker.displayName} earned {finalPoints} pt(s) for killing NPC {npcName}");
+
+            return true;
         }
-		
-		private bool HandleNpcKilledByTrap(BasePlayer victim, BaseCombatEntity entity, HitInfo info)
-		{
-			if (!victim.IsNpc || entity == null) return false;
+        
+        private bool HandleNpcKilledByTrap(BasePlayer victim, BaseCombatEntity entity, HitInfo info)
+        {
+            if (!victim.IsNpc || entity == null)
+                return false;
 
-			ulong ownerId = entity.OwnerID;
-			if (ownerId == 0 || !participants.Contains(ownerId)) return false;
+            ulong ownerId = entity.OwnerID;
+            if (ownerId == 0 || !participants.Contains(ownerId))
+                return false;
 
-			if (HasReachedKillCap(npcKillCounts, ownerId, Configuration.NpcKillCap, "NPC", BasePlayer.FindByID(ownerId)))
-				return false;
+            if (IsActionCodeDisabled("NPC"))
+                return false;
 
-			string trapName = GetFriendlyTrapName(entity.ShortPrefabName ?? "Unknown");
-			string npcName = GetFriendlyNpcName(victim.ShortPrefabName ?? "Unknown");
-			string ownerName = GetPlayerName(ownerId);
+            if (HasReachedKillCap(npcKillCounts, ownerId, Configuration.NpcKillCap, "NPC", BasePlayer.FindByID(ownerId)))
+                return false;
 
-			if (Configuration.ScoreRules.TryGetValue("NPC", out int points))
-			{
-				UpdatePlayerScore(ownerId, "NPC", $"eliminating an NPC ({npcName}) with {trapName}", victim, info, attackerName: ownerName, entityName: npcName);
-				return true;
-			}
+            string trapName = GetFriendlyTrapName(entity.ShortPrefabName ?? "Unknown");
+            string npcName = GetFriendlyNpcName(victim.ShortPrefabName ?? "Unknown");
+            string ownerName = GetPlayerName(ownerId);
 
-			return false;
-		}
+            UpdatePlayerScore(ownerId, "NPC", $"eliminating an NPC ({npcName}) with {trapName}", victim, info, attackerName: ownerName, entityName: npcName);
+
+            int finalPoints = GetEffectiveScore("NPC");
+            Puts($"[Debug] {ownerName} earned {finalPoints} pt(s) for killing NPC {npcName} with {trapName}");
+
+            return true;
+        }
 
         private bool HandleSelfInflicted(BasePlayer victim, BasePlayer attacker, HitInfo info)
         {
@@ -2201,16 +2269,17 @@ namespace Oxide.Plugins
             if (!participants.Contains(victim.userID))
                 return false;
 
+            if (IsActionCodeDisabled("JOKE"))
+                return false;
+
             string cause = info?.damageTypes?.GetMajorityDamageType().ToString() ?? "unknown cause";
 
-            if (Configuration.ScoreRules.TryGetValue("JOKE", out int points))
-            {
-                UpdatePlayerScore(victim.userID, "JOKE", $"self-inflicted death ({cause})", victim, info);
-                Puts($"[Debug] {victim.displayName} died from {cause} (self-inflicted).");
-                return true;
-            }
+            UpdatePlayerScore(victim.userID, "JOKE", $"self-inflicted death ({cause})", victim, info);
 
-            return false;
+            int points = GetEffectiveScore("JOKE");
+            Puts($"[Debug] {victim.displayName} died from {cause} (self-inflicted). Lost {points} point(s).");
+
+            return true;
         }
     #endregion
     #region OnEntityDeath
@@ -2240,49 +2309,53 @@ namespace Oxide.Plugins
             if (killer == null || !participants.Contains(killer.userID))
                 return false;
 
-            if (!Configuration.ScoreRules.TryGetValue("ENT", out int points))
+            if (IsActionCodeDisabled("ENT"))
                 return false;
 
             string entityType = prefabName.Contains("helicopter") ? "Helicopter" : "Bradley";
 
             UpdatePlayerScore(killer.userID, "ENT", $"destroying a {entityType}", null, info, entityName: entityType);
 
-            Puts($"[Debug] {killer.displayName} earned {points} point(s) for downing a {entityType}.");
+            int finalPoints = GetEffectiveScore("ENT");
+            Puts($"[Debug] {killer.displayName} earned {finalPoints} point(s) for downing a {entityType}.");
+
             return true;
         }
-		
-		private bool HandleLongDistanceAnimalKill(BaseCombatEntity entity, HitInfo info)
-		{
-			if (!IsAnimalKill(entity.ShortPrefabName))
-				return false;
+        
+        private bool HandleLongDistanceAnimalKill(BaseCombatEntity entity, HitInfo info)
+        {
+            if (!IsAnimalKill(entity.ShortPrefabName))
+                return false;
 
-			var killer = info?.InitiatorPlayer;
-			if (killer == null || !participants.Contains(killer.userID))
-				return false;
+            var killer = info?.InitiatorPlayer;
+            if (killer == null || !participants.Contains(killer.userID))
+                return false;
 
-			if (info?.Weapon == null || !(info.Weapon is BaseProjectile))
-			{
-				Puts($"[Debug] Ignored long-range animal kill by {killer.displayName} — not a projectile weapon.");
-				return false;
-			}
+            if (info?.Weapon == null || !(info.Weapon is BaseProjectile))
+            {
+                Puts($"[Debug] Ignored long-range animal kill by {killer.displayName} — not a projectile weapon.");
+                return false;
+            }
 
-			float distance = Vector3.Distance(killer.transform.position, entity.transform.position);
-			if (distance <= Configuration.AnimalKillDistance)
-				return false;
+            float distance = Vector3.Distance(killer.transform.position, entity.transform.position);
+            if (distance <= Configuration.AnimalKillDistance)
+                return false;
 
-			if (!Configuration.ScoreRules.TryGetValue("WHY", out int points))
-				return false;
+            if (IsActionCodeDisabled("WHY"))
+                return false;
 
-			if (HasReachedKillCap(animalKillCounts, killer.userID, Configuration.AnimalKillCap, "animal", killer))
-				return false;
+            if (HasReachedKillCap(animalKillCounts, killer.userID, Configuration.AnimalKillCap, "animal", killer))
+                return false;
 
-			string animalName = GetFriendlyAnimalName(entity.ShortPrefabName);
+            string animalName = GetFriendlyAnimalName(entity.ShortPrefabName);
 
-			UpdatePlayerScore(killer.userID, "WHY", $"killing an animal ({animalName}) from {distance:F1} meters away", null, info, entityName: animalName, distance: distance);
+            UpdatePlayerScore(killer.userID, "WHY", $"killing an animal ({animalName}) from {distance:F1} meters away", null, info, entityName: animalName, distance: distance);
 
-			Puts($"[Debug] Awarded {points} pt(s) to {killer.displayName} for {animalName} kill at {distance:F1} m");
-			return true;
-		}
+            int finalPoints = GetEffectiveScore("WHY");
+            Puts($"[Debug] Awarded {finalPoints} pt(s) to {killer.displayName} for {animalName} kill at {distance:F1} m");
+
+            return true;
+        }
     #endregion
     #region Kill Cap
         private bool HasReachedKillCap(Dictionary<ulong, int> tracker, ulong userId, int cap, string label, BasePlayer player = null)
@@ -2515,11 +2588,11 @@ namespace Oxide.Plugins
             }
 
             int previousScore;
-			lock (participantsDataLock)
-			{
-				previousScore = participant.Score;
-				participant.Score += points;
-			}
+            lock (participantsDataLock)
+            {
+                previousScore = participant.Score;
+                participant.Score += points;
+            }
 
             Puts($"[Debug] {participant.Name} (UserID: {userId}) | Previous Score: {previousScore} | Gained: {points} | New Score: {participant.Score}");
 
@@ -2835,13 +2908,13 @@ namespace Oxide.Plugins
             bool pointsDeducted = false;
 
             lock (participantsDataLock)
-			{
-				if (participant.Score >= kitPrice)
-				{
-					participant.Score -= kitPrice;
-					pointsDeducted = true;
-				}
-			}
+            {
+                if (participant.Score >= kitPrice)
+                {
+                    participant.Score -= kitPrice;
+                    pointsDeducted = true;
+                }
+            }
 
             var tokens = new Dictionary<string, string>
             {
@@ -2955,8 +3028,8 @@ namespace Oxide.Plugins
             {
                 var newParticipant = new PlayerStats(player.userID) { Name = player.displayName };
                 participantsData.AddOrUpdate(player.userID,
-					id => new PlayerStats(player.userID) { Name = player.displayName },
-					(id, existing) => existing);
+                    id => new PlayerStats(player.userID) { Name = player.displayName },
+                    (id, existing) => existing);
 
                 SaveParticipantsData();
 
@@ -3071,8 +3144,8 @@ namespace Oxide.Plugins
 
             var newParticipant = new PlayerStats(player.userID) { Name = player.displayName };
             participantsData.AddOrUpdate(player.userID,
-				id => new PlayerStats(player.userID) { Name = player.displayName },
-				(id, existing) => existing);
+                id => new PlayerStats(player.userID) { Name = player.displayName },
+                (id, existing) => existing);
 
             inactiveParticipants.Remove(player.userID);
             openTournamentPlayers.Add(player.userID);
