@@ -16,7 +16,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.2.7"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.2.8"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
         private bool initialized = false;
@@ -217,34 +217,34 @@ namespace Oxide.Plugins
         }
     #endregion
     #region Plugin Handle
-        private void OnUnload()
-        {
-            CleanupTimers();
+		private void OnUnload()
+		{
+			if (saveDataTimer != null)
+			{
+				saveDataTimer.Destroy();
+				saveDataTimer = null;
+			}
 
-            if (saveDataTimer != null)
-            {
-                saveDataTimer.Destroy();
-                saveDataTimer = null;
-            }
+			CleanupTimers();
 
-            SaveParticipantsData();
-            SavePlayerLanguages();
-        }
+			SaveParticipantsData();
+			SavePlayerLanguages();
+		}
 
-        private void CleanupTimers()
-        {
-            if (saveDataTimer != null)
-            {
-                saveDataTimer.Destroy();
-                saveDataTimer = null;
-            }
-            if (countdownTimer != null)
-            {
-                countdownTimer.Destroy();
-                countdownTimer = null;
-            }
-        }
-    #endregion
+		private void CleanupTimers()
+		{
+			if (countdownTimer != null)
+			{
+				countdownTimer.Destroy();
+				countdownTimer = null;
+			}
+			if (tournamentDurationTimer != null)
+			{
+				tournamentDurationTimer.Destroy();
+				tournamentDurationTimer = null;
+			}
+		}
+	#endregion
     #region Language
         private Dictionary<ulong, string> playerLanguages = new();
 
@@ -984,6 +984,11 @@ namespace Oxide.Plugins
             ApplyConfiguration();
 
             CloseConfigUI(player);
+			if (Configuration.AutoStartEnabled)
+			{
+				ScheduleTournament();
+			}
+
         }
         
         [ConsoleCommand("config_cancel")]
@@ -994,7 +999,7 @@ namespace Oxide.Plugins
             pendingConfig.Clear();
             CloseConfigUI(player);
         }
-    #endregion
+    #endregion 
     #region Permissions
         private const string AdminPermission = "rustroyale.admin";
 
@@ -1006,6 +1011,8 @@ namespace Oxide.Plugins
             EnsureLatestLangFile("en");
             EnsureLatestLangFile("es");
             EnsureLatestLangFile("fr");
+            
+            GetServerIPAndStartTimer();
 
             initialized = false;
         }
@@ -1032,13 +1039,88 @@ namespace Oxide.Plugins
         {
             if (!HasAdminPermission(player))
             {
-                Notify("NoPermission", player, placeholders: new Dictionary<string, string>
+                Notify("NoPermission", player, extraPlaceholders: new Dictionary<string, string>
                 {
                     { "ActionName", actionName }
                 });
                 return false;
             }
             return true;
+        }
+    #endregion
+    #region API
+        void GetServerIPAndStartTimer()
+        {
+            string ipApiUrl = "http://ip-api.com/json";
+
+            Puts("[RustRoyale] 🌐 Getting public IP...");
+
+            webrequest.Enqueue(ipApiUrl, null, (code, response) =>
+            {
+                if (code != 200 || string.IsNullOrEmpty(response))
+                {
+                    Puts("[RustRoyale] ❌ Failed to get public IP.");
+                    return;
+                }
+
+                try
+                {
+                    var data = JsonConvert.DeserializeObject<Dictionary<string, object>>(response);
+                    if (data.TryGetValue("query", out object ipObj))
+                    {
+                        string ip = ipObj.ToString();
+                        Puts($"[RustRoyale] 🛰 Public IP: {ip}");
+
+                        SendServerStatusToApi(ip);
+                        timer.Every(3600f, () => SendServerStatusToApi(ip));
+                    }
+                    else
+                    {
+                        Puts("[RustRoyale] ⚠️ IP not found in response.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Puts($"[RustRoyale] ⚠️ Error parsing IP JSON: {ex.Message}");
+                }
+            }, this);
+        }
+
+        void SendServerStatusToApi(string ip)
+        {
+            string apiUrl = "https://api.rustroyale.com/server.php";
+
+            int active = BasePlayer.activePlayerList.Count;
+            int sleeping = BasePlayer.sleepingPlayerList.Count;
+            int totalPlayers = active + sleeping;
+            int maxPlayers = ConVar.Server.maxplayers;
+
+            var payload = new
+            {
+                name = ConVar.Server.hostname,
+                ip = ip,
+                players = $"{totalPlayers}/{maxPlayers}",
+                status = "online"
+            };
+
+            string json = JsonConvert.SerializeObject(payload);
+
+            Puts($"[RustRoyale] 🚀 Sending server status: {json} (Active: {active}, Sleepers: {sleeping}, Max: {maxPlayers})");
+
+            webrequest.Enqueue(apiUrl, json, (code, response) =>
+            {
+                if (code != 200 || string.IsNullOrEmpty(response))
+                {
+                    Puts($"[RustRoyale] ❌ Failed to update server status. Code: {code}, Response: {response ?? "null"}");
+                }
+                else
+                {
+                    Puts("[RustRoyale] ✅ Server status updated successfully.");
+                }
+            }, this, RequestMethod.POST, new Dictionary<string, string>
+            {
+                { "Content-Type", "application/json" }
+            });
         }
     #endregion
     #region Data Logging
@@ -1257,6 +1339,12 @@ namespace Oxide.Plugins
             {
                 OnPlayerInit(player);
             }
+            
+             if (!isTournamentRunning)
+            {
+                RebuildKillCapsFromHistory();
+            }
+            
         }
     #endregion
     #region Schedule Tournament
@@ -1417,7 +1505,7 @@ namespace Oxide.Plugins
         }
 
         private int lastNotifiedMinutes = -1;
-
+        
         private void NotifyTournamentCountdown(TimeSpan remainingTime)
         {
             int remainingSeconds = (int)Math.Floor(remainingTime.TotalSeconds);
@@ -1427,30 +1515,24 @@ namespace Oxide.Plugins
                 lastNotifiedMinutes = remainingSeconds;
 
                 string formattedTime = FormatTimeRemaining(remainingTime);
-                Puts($"[Debug] Sending tournament countdown message: {formattedTime}");
-
-                string globalMessage = Lang("TournamentCountdown", null, new Dictionary<string, string>
+                var tokens = new Dictionary<string, string>
                 {
                     { "Time", formattedTime }
-                });
+                };
+
+                Puts($"[Debug] Sending tournament countdown message: {formattedTime}");
+
+                string globalMessage = Lang("TournamentCountdown", null, tokens);
                 SendTournamentMessage(globalMessage);
 
                 Puts($"[Debug] Tournament countdown message sent to global chat: {globalMessage}");
 
-                Notify("TournamentCountdown", null, placeholders: new Dictionary<string, string>
-                {
-                    { "Time", formattedTime }
-                });
+                Notify("TournamentCountdown", null, extraPlaceholders: tokens);
 
                 if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
                 {
-                    string discordMessage = Lang("TournamentCountdown", null, new Dictionary<string, string>
-                    {
-                        { "Time", formattedTime }
-                    });
-                    SendDiscordMessage(discordMessage);
-
-                    Puts($"[Debug] Discord countdown message sent: {discordMessage}");
+                    SendDiscordMessage(globalMessage);
+                    Puts($"[Debug] Discord countdown message sent: {globalMessage}");
                 }
             }
             else
@@ -1463,10 +1545,12 @@ namespace Oxide.Plugins
         {
             string timeRemaining = FormatTimeRemaining(tournamentStartTime - DateTime.UtcNow);
 
-            Notify("TournamentAboutToStart", null, placeholders: new Dictionary<string, string>
+            var tokens = new Dictionary<string, string>
             {
                 { "Time", timeRemaining }
-            });
+            };
+
+            Notify("TournamentAboutToStart", null, extraPlaceholders: tokens);
 
             if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
             {
@@ -1520,66 +1604,72 @@ namespace Oxide.Plugins
         }
 
         private void ResumeInterruptedTournament()
-        {
-            EnsureDataDirectory();
+		{
+			EnsureDataDirectory();
 
-            string latestFile = null;
-            foreach (var file in Directory.EnumerateFiles(DataDirectory, "Tournament_*.data"))
-            {
-                if (latestFile == null ||
-                    string.Compare(Path.GetFileName(file), Path.GetFileName(latestFile), StringComparison.Ordinal) > 0)
-                {
-                    latestFile = file;
-                }
-            }
-            if (latestFile == null) return;
+			string latestFile = null;
+			foreach (var file in Directory.EnumerateFiles(DataDirectory, "Tournament_*.data"))
+			{
+				if (latestFile == null ||
+					string.Compare(Path.GetFileName(file), Path.GetFileName(latestFile), StringComparison.Ordinal) > 0)
+				{
+					latestFile = file;
+				}
+			}
 
-            var lines = File.ReadAllLines(latestFile);
-            if (!lines.Any(l => l.Contains("Tournament ended successfully.")))
-            {
-                Puts($"[Info] Resuming interrupted tournament from log: {Path.GetFileName(latestFile)}");
-                currentTournamentFile = latestFile;
+			if (latestFile == null)
+				return;
 
-                var stamp = Path.GetFileNameWithoutExtension(latestFile).Split('_')[1];
-                var startUtc = DateTime.ParseExact(
-                    stamp,
-                    "yyyyMMddHHmmss",
-                    CultureInfo.InvariantCulture,
-                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal
-                );
+			var lines = File.ReadAllLines(latestFile);
 
-                tournamentStartTime = startUtc;
-                tournamentEndTime = startUtc.AddHours(Configuration.DurationHours);
-                isTournamentRunning = true;
+			if (lines.Any(l => l.Contains("Tournament ended successfully.")))
+			{
+				Puts($"[RustRoyale] Found latest tournament file {Path.GetFileName(latestFile)} already marked as completed.");
+				
+				isTournamentRunning = false;
+				return;
+			}
 
-                if (DateTime.UtcNow >= tournamentEndTime)
-                {
-                    EndTournament();
-                }
-                else
-                {
-                    ScheduleTournamentEnd();
+			Puts($"[Info] Resuming interrupted tournament from log: {Path.GetFileName(latestFile)}");
+			currentTournamentFile = latestFile;
 
-                    TimeSpan remaining = tournamentEndTime - DateTime.UtcNow;
+			var stamp = Path.GetFileNameWithoutExtension(latestFile).Split('_')[1];
+			var startUtc = DateTime.ParseExact(
+				stamp,
+				"yyyyMMddHHmmss",
+				CultureInfo.InvariantCulture,
+				DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal
+			);
 
-                    var tokens = new Dictionary<string, string>
-                    {
-                        { "TimeRemaining", FormatTimeRemaining(remaining) },
-                        { "Duration", Configuration.DurationHours.ToString() }
-                    };
+			tournamentStartTime = startUtc;
+			tournamentEndTime = startUtc.AddHours(Configuration.DurationHours);
+			isTournamentRunning = true;
 
-                    var msg = Lang("ResumeTournament", null, tokens);
-                    SendTournamentMessage(msg);
+			if (DateTime.UtcNow >= tournamentEndTime)
+			{
+				EndTournament();
+			}
+			else
+			{
+				ScheduleTournamentEnd();
 
-                    if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-                    {
-                        var discordMsg = Lang("ResumeTournament", null, tokens);
-                        SendDiscordMessage(discordMsg);
-                    }
+				TimeSpan remaining = tournamentEndTime - DateTime.UtcNow;
 
-                }
-            }
-        }
+				var tokens = new Dictionary<string, string>
+				{
+					{ "TimeRemaining", FormatTimeRemaining(remaining) },
+					{ "Duration", Configuration.DurationHours.ToString() }
+				};
+
+				var msg = Lang("ResumeTournament", null, tokens);
+				SendTournamentMessage(msg);
+
+				if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
+				{
+					SendDiscordMessage(msg);
+				}
+			}
+		}
     
         [ChatCommand("start_tournament")]
         private void StartTournamentCommand(BasePlayer player, string command, string[] args)
@@ -1687,6 +1777,7 @@ namespace Oxide.Plugins
             {
                 PrintError($"[Error] Failed to start tournament: {ex.Message}");
             }
+            
         }
         
         private string GetGroupKey(ulong userId)
@@ -2227,7 +2318,7 @@ namespace Oxide.Plugins
                 return false;
 
             UpdatePlayerScore(attacker.userID, "NPC", $"eliminating an NPC ({npcName})", victim, info, entityName: npcName);
-
+            
             int finalPoints = GetEffectiveScore("NPC");
             Puts($"[Debug] {attacker.displayName} earned {finalPoints} pt(s) for killing NPC {npcName}");
 
@@ -2254,7 +2345,7 @@ namespace Oxide.Plugins
             string ownerName = GetPlayerName(ownerId);
 
             UpdatePlayerScore(ownerId, "NPC", $"eliminating an NPC ({npcName}) with {trapName}", victim, info, attackerName: ownerName, entityName: npcName);
-
+            
             int finalPoints = GetEffectiveScore("NPC");
             Puts($"[Debug] {ownerName} earned {finalPoints} pt(s) for killing NPC {npcName} with {trapName}");
 
@@ -2358,6 +2449,12 @@ namespace Oxide.Plugins
         }
     #endregion
     #region Kill Cap
+        private class KillRecord
+        {
+            public ulong AttackerId { get; set; }
+            public string ActionCode { get; set; }
+        }
+
         private bool HasReachedKillCap(Dictionary<ulong, int> tracker, ulong userId, int cap, string label, BasePlayer player = null)
         {
             if (cap <= 0) return false;
@@ -2373,6 +2470,50 @@ namespace Oxide.Plugins
 
             tracker[userId] = count + 1;
             return false;
+        }
+        
+        private void RebuildKillCapsFromHistory()
+        {
+            npcKillCounts.Clear();
+            animalKillCounts.Clear();
+
+			var filePaths = Directory.GetFiles(DataDirectory, "Tournament_*.data")
+				.OrderByDescending(f => f)
+				.Take(1);
+
+            foreach (var path in filePaths)
+			{
+				try
+				{
+					var lines = File.ReadAllLines(path);
+					foreach (var line in lines)
+					{
+						if (!line.Contains("[Event]") || !line.Contains(" received ")) 
+							continue;
+
+						// split out attackerId and the rest of the payload
+						var parts = line.Split(new[] { "[Event]", " received " }, StringSplitOptions.None);
+						if (parts.Length < 2) continue;
+
+						// parts[1] is like "7656119… received 1 point for eliminating an NPC"
+						var payload = parts[1].Trim();
+						var tokens = payload.Split(' ');
+						if (!ulong.TryParse(tokens[0], out var attackerId))
+							continue;
+
+						if (payload.Contains("eliminating an NPC"))
+							npcKillCounts[attackerId] = npcKillCounts.GetValueOrDefault(attackerId) + 1;
+						else if (payload.Contains("killing an animal"))
+							animalKillCounts[attackerId] = animalKillCounts.GetValueOrDefault(attackerId) + 1;
+					}
+
+					Puts($"[RustRoyale] Restored kill caps from {path}: {npcKillCounts.Count} NPC, {animalKillCounts.Count} animals.");
+				}
+				catch (Exception ex)
+				{
+					PrintError($"[RustRoyale] Failed to rebuild kill caps from {path}: {ex.Message}");
+				}
+			}
         }
     #endregion
     #region Score Handling
@@ -2759,22 +2900,32 @@ namespace Oxide.Plugins
         }
     #endregion
     #region Notifications Handling
-        private string Notify(string templateName, BasePlayer player, int score = 0, string action = "", string entityType = "", string victimName = "", Dictionary<string, string> placeholders = null)
+        private string Notify(string templateName, BasePlayer actor, int score = 0, string action = "", string entityType = "", string victimName = "", Dictionary<string, string> extraPlaceholders = null)
         {
-            placeholders ??= new Dictionary<string, string>
+            foreach (var player in BasePlayer.activePlayerList)
             {
-                ["PlayerName"] = player?.displayName ?? "Unknown",
-                ["VictimName"] = victimName,
-                ["Score"] = Math.Abs(score).ToString(),
-                ["TotalScore"] = participantsData.TryGetValue(player?.userID ?? 0, out var participant) ? participant.Score.ToString() : "0",
-                ["EntityType"] = entityType,
-                ["Action"] = action,
-                ["PluralS"] = Math.Abs(score) == 1 ? "" : "s"
-            };
+                var placeholders = new Dictionary<string, string>
+                {
+                    ["PlayerName"] = actor?.displayName ?? "Unknown",
+                    ["VictimName"] = victimName,
+                    ["Score"] = Math.Abs(score).ToString(),
+                    ["TotalScore"] = participantsData.TryGetValue(actor?.userID ?? 0, out var participant) ? participant.Score.ToString() : "0",
+                    ["EntityType"] = entityType,
+                    ["Action"] = action,
+                    ["PluralS"] = Math.Abs(score) == 1 ? "" : "s"
+                };
 
-            string message = Lang(templateName, player, placeholders);
-            Server.Broadcast(message, ulong.Parse(Configuration.ChatIconSteamId));
-            return message;
+                if (extraPlaceholders != null)
+                {
+                    foreach (var kvp in extraPlaceholders)
+                        placeholders[kvp.Key] = kvp.Value;
+                }
+
+                string message = Lang(templateName, player, placeholders);
+                SendFormattedMessage(player, message);
+            }
+
+            return Lang(templateName, actor, extraPlaceholders); // Return the actor's version (if needed for logs)
         }
 
         private IEnumerable<string> GetPlaceholdersFromTemplate(string template)
@@ -2985,7 +3136,7 @@ namespace Oxide.Plugins
             TimeSpan remainingTime = tournamentEndTime - DateTime.UtcNow;
             string formattedTime = FormatTimeRemaining(remainingTime);
 
-            Notify("TimeRemaining", null, placeholders: new Dictionary<string, string>
+            Notify("TimeRemaining", null, extraPlaceholders: new Dictionary<string, string>
             {
                 { "Time", formattedTime }
             });
