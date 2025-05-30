@@ -62,5 +62,10 @@
   "Bruh_Friendly": "Éliminé par Héli/PNJ",
   "AnimalKillFormat": "Tuer un animal >{0} m ({1})",
   "MaxCapFormat": "max. {0}",
-  "NoCap": "sans limite"
+  "NoCap": "sans limite",
+  "Duration_Label": "Durée : {0} heures",
+  "TimeLeft_Label": "Temps restant : {0}",
+  "TournamentEnded": "Tournoi terminé",
+  "NotAvailable": "Non disponible",
+  "Participants_Label": "Participants : {0}"
 }
