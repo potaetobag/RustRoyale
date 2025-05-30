@@ -67,5 +67,6 @@
     "TimeLeft_Label": "Tiempo restante: {0}",
     "TournamentEnded": "Torneo finalizado",
     "NotAvailable": "No disponible",
-    "Participants_Label": "Participantes: {0}"
+    "Participants_Label": "Participantes: {0}",
+    "Kit_Label": "Kit {0}: {1} pts"
 }
