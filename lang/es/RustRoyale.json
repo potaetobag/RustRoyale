@@ -53,5 +53,14 @@
     "ConfigSave": "Guardar y recargar",
     "ConfigCancel": "Cancelar",
     "ConfigUpdated": "Se actualizó {Key} = {Value}",
-    "ConfigParseError": "No se pudo analizar {Key}: {Error}"
+    "ConfigParseError": "No se pudo analizar {Key}: {Error}",
+    "Kill_Friendly": "Matar a otro jugador",
+    "Dead_Friendly": "Muerto por un jugador",
+    "Joke_Friendly": "Muerte por trampa/caída",
+    "NpcLabelFormat": "Matar un NPC ({0})",
+    "Ent_Friendly": "Matar Heli/Bradley",
+    "Bruh_Friendly": "Asesinado por Heli/NPC",
+    "AnimalKillFormat": "Matar un animal >{0}m ({1})",
+    "MaxCapFormat": "máx {0}",
+    "NoCap": "sin límite"
 }
