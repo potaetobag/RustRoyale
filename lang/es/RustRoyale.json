@@ -71,5 +71,6 @@
     "Kit_Label": "Kit {0}: {1} pts",
     "HelpCommands_Text": "Puedes usar comandos como /help_tournament para obtener más información.",
     "Toggle_ShowNextTime": "Mostrar la próxima vez",
-    "Toggle_DontShowAgain": "No mostrar de nuevo"
+    "Toggle_DontShowAgain": "No mostrar de nuevo",
+    "Button_Close": "Cerrar"
 }
