@@ -62,5 +62,10 @@
     "Bruh_Friendly": "Asesinado por Heli/NPC",
     "AnimalKillFormat": "Matar un animal >{0}m ({1})",
     "MaxCapFormat": "máx {0}",
-    "NoCap": "sin límite"
+    "NoCap": "sin límite",
+    "Duration_Label": "Duración: {0} horas",
+    "TimeLeft_Label": "Tiempo restante: {0}",
+    "TournamentEnded": "Torneo finalizado",
+    "NotAvailable": "No disponible",
+    "Participants_Label": "Participantes: {0}"
 }
