@@ -68,5 +68,6 @@
   "TournamentEnded": "Tournoi terminé",
   "NotAvailable": "Non disponible",
   "Participants_Label": "Participants : {0}",
-  "Kit_Label": "Kit {0} : {1} pts"
+  "Kit_Label": "Kit {0} : {1} pts",
+  "HelpCommands_Text": "Vous pouvez utiliser des commandes telles que /help_tournament pour en savoir plus."
 }
