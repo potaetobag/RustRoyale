@@ -53,5 +53,14 @@
   "ConfigSave": "Save & Reload",
   "ConfigCancel": "Cancel",
   "ConfigUpdated": "Updated {Key} = {Value}",
-  "ConfigParseError": "Failed to parse {Key}: {Error}"
+  "ConfigParseError": "Failed to parse {Key}: {Error}",
+  "Kill_Friendly": "Kill another player",
+  "Dead_Friendly": "Killed by a player",
+  "Joke_Friendly": "Trap/fall death",
+  "NpcLabelFormat": "Kill an NPC ({0})",
+  "Ent_Friendly": "Kill Heli/Bradley",
+  "Bruh_Friendly": "Killed by Heli/NPC",
+  "AnimalKillFormat": "Animal kill >{0}m ({1})",
+  "MaxCapFormat": "max {0}",
+  "NoCap": "no cap"
 }
