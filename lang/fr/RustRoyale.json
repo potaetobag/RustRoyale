@@ -53,5 +53,14 @@
   "ConfigSave": "Enregistrer et recharger",
   "ConfigCancel": "Annuler",
   "ConfigUpdated": "Mis à jour {Key} = {Value}",
-  "ConfigParseError": "Échec de l'analyse de {Key} : {Error}"
+  "ConfigParseError": "Échec de l'analyse de {Key} : {Error}",
+  "Kill_Friendly": "Éliminer un autre joueur",
+  "Dead_Friendly": "Éliminé par un joueur",
+  "Joke_Friendly": "Mort par piège/chute",
+  "NpcLabelFormat": "Éliminer un PNJ ({0})",
+  "Ent_Friendly": "Éliminer Héli/Bradley",
+  "Bruh_Friendly": "Éliminé par Héli/PNJ",
+  "AnimalKillFormat": "Tuer un animal >{0} m ({1})",
+  "MaxCapFormat": "max. {0}",
+  "NoCap": "sans limite"
 }
