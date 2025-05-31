@@ -73,5 +73,6 @@
     "Toggle_ShowNextTime": "Mostrar la próxima vez",
     "Toggle_DontShowAgain": "No mostrar de nuevo",
     "Button_Close": "Cerrar",
-    "ArticleTemplate": "un {0}"
+    "ArticleTemplate": "un {0}",
+    "MaxKillsReached": "Llegaste al máximo de {0} muertes permitidas pa’ este torneo."
 }
