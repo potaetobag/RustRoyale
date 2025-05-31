@@ -16,7 +16,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.2.8"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.2.9"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
         private bool initialized = false;
@@ -30,12 +30,44 @@ namespace Oxide.Plugins
         private string WelcomeOptOutFile => $"{DataDirectory}/WelcomeOptOut.json";
         private Dictionary<ulong, string> teamLeaderNames = new();
         private string TeamLeadersFile => $"{DataDirectory}/TeamLeaders.json";
-        private string WithIndefiniteArticle(string word)
+        private Lang lang;
+        private bool hasRebuiltCaps = false;
+        private string WithIndefiniteArticle(string word, string langCode)
+        {
+            var lang = Interface.Oxide.GetLibrary<Lang>();
+
+            if (string.IsNullOrEmpty(word))
             {
-                if (string.IsNullOrEmpty(word)) return "an unknown entity";
-                string lower = word.ToLowerInvariant();
-                return "aeiou".Contains(lower[0]) ? $"an {word}" : $"a {word}";
+                var unknown = lang.GetMessage("UnknownEntity", this, langCode) ?? "unknown entity";
+                if (langCode.StartsWith("en"))
+                {
+                    char first = unknown.ToLowerInvariant()[0];
+                    var fmtTpl = "aeiou".Contains(first)
+                        ? lang.GetMessage("ArticleTemplateAE", this, langCode)
+                        : lang.GetMessage("ArticleTemplateA",  this, langCode);
+                    return string.Format(fmtTpl, unknown);
+                }
+                else
+                {
+                    var genericTpl = lang.GetMessage("ArticleTemplate", this, langCode) ?? "a {0}";
+                    return string.Format(genericTpl, unknown);
+                }
             }
+
+            if (langCode.StartsWith("en"))
+            {
+                char first = word.ToLowerInvariant()[0];
+                var fmtTpl = "aeiou".Contains(first)
+                    ? lang.GetMessage("ArticleTemplateAE", this, langCode)
+                    : lang.GetMessage("ArticleTemplateA",  this, langCode);
+                return string.Format(fmtTpl, word);
+            }
+            else
+            {
+                var genericTpl = lang.GetMessage("ArticleTemplate", this, langCode) ?? "a {0}";
+                return string.Format(genericTpl, word);
+            }
+        }
     
     #region Configuration
         private ConfigData Configuration;
@@ -217,34 +249,34 @@ namespace Oxide.Plugins
         }
     #endregion
     #region Plugin Handle
-		private void OnUnload()
-		{
-			if (saveDataTimer != null)
-			{
-				saveDataTimer.Destroy();
-				saveDataTimer = null;
-			}
+        private void OnUnload()
+        {
+            if (saveDataTimer != null)
+            {
+                saveDataTimer.Destroy();
+                saveDataTimer = null;
+            }
 
-			CleanupTimers();
+            CleanupTimers();
 
-			SaveParticipantsData();
-			SavePlayerLanguages();
-		}
+            SaveParticipantsData();
+            SavePlayerLanguages();
+        }
 
-		private void CleanupTimers()
-		{
-			if (countdownTimer != null)
-			{
-				countdownTimer.Destroy();
-				countdownTimer = null;
-			}
-			if (tournamentDurationTimer != null)
-			{
-				tournamentDurationTimer.Destroy();
-				tournamentDurationTimer = null;
-			}
-		}
-	#endregion
+        private void CleanupTimers()
+        {
+            if (countdownTimer != null)
+            {
+                countdownTimer.Destroy();
+                countdownTimer = null;
+            }
+            if (tournamentDurationTimer != null)
+            {
+                tournamentDurationTimer.Destroy();
+                tournamentDurationTimer = null;
+            }
+        }
+    #endregion
     #region Language
         private Dictionary<ulong, string> playerLanguages = new();
 
@@ -433,6 +465,7 @@ namespace Oxide.Plugins
         {
             CuiHelper.DestroyUi(player, WelcomeUiPanelName);
             var container = new CuiElementContainer();
+            string langCode = lang.GetLanguage(player.UserIDString);
 
             container.Add(new CuiPanel
             {
@@ -502,62 +535,129 @@ namespace Oxide.Plugins
 
             for (int i = 0; i < maxRows; i++)
             {
-                if (i == 0)
+                if (i < 3)
                 {
-                    AddCuiLabel(container, scrollView, $"{col1Min} {y - colRowHeight}", $"{col1Max} {y}", $"• Duration: {Configuration.DurationHours} hours", 13);
+                    string text;
 
-                }
-                else if (i == 1)
-                {
-                    string timeLeft = "N/A";
-                    if (tournamentStartTime > DateTime.MinValue)
+                    switch (i)
                     {
-                        var endTime = tournamentStartTime.AddHours(Configuration.DurationHours);
-                        var remaining = endTime - DateTime.UtcNow;
-                        timeLeft = remaining.TotalSeconds > 0
-                            ? $"{(int)remaining.TotalHours}h {remaining.Minutes}m"
-                            : "Tournament ended";
+                        case 0:
+                            text = string.Format(lang.GetMessage("Duration_Label", this, langCode),
+                                                 Configuration.DurationHours);
+                            break;
+
+                        case 1:
+                            string timeLeft;
+                            if (tournamentStartTime > DateTime.MinValue)
+                            {
+                                var endTime   = tournamentStartTime.AddHours(Configuration.DurationHours);
+                                var remaining = endTime - DateTime.UtcNow;
+                                timeLeft = remaining.TotalSeconds > 0
+                                    ? $"{(int)remaining.TotalHours}h {remaining.Minutes}m"
+                                    : lang.GetMessage("TournamentEnded", this, langCode);
+                            }
+                            else timeLeft = lang.GetMessage("NotAvailable", this, langCode);
+
+                            text = string.Format(lang.GetMessage("TimeLeft_Label", this, langCode),
+                                                 timeLeft);
+                            break;
+
+                        case 2:
+                            text = string.Format(lang.GetMessage("Participants_Label", this, langCode),
+                                                 participants.Count);
+                            break;
+
+                        default:
+                            text = string.Empty;
+                            break;
                     }
 
-                    AddCuiLabel(container, scrollView, $"{col1Min} {y - colRowHeight}", $"{col1Max} {y}", $"• Time Left: {timeLeft}", 13);
-
+                    AddCuiLabel(container, scrollView,
+                                $"{col1Min} {y - colRowHeight}",
+                                $"{col1Max} {y}",
+                                $"• {text}",
+                                13);
                 }
-                else if (i == 2)
-                {
-                    AddCuiLabel(container, scrollView, $"{col1Min} {y - colRowHeight}", $"{col1Max} {y}", $"• Participants: {participants.Count}", 13);
-
-                }
-
+                
                 if (i < Configuration.ScoreRules.Count)
                 {
-                    var rule = Configuration.ScoreRules.ElementAt(i);
-                    string friendly = rule.Key switch
+                    var rule     = Configuration.ScoreRules.ElementAt(i);
+                    string friendly;
+
+                    switch (rule.Key)
                     {
-                        "KILL" => "Kill another player",
-                        "DEAD" => "Killed by a player",
-                        "JOKE" => "Trap/fall death",
-                        "NPC" => $"Kill an NPC ({(Configuration.NpcKillCap > 0 ? $"max {Configuration.NpcKillCap}" : "no cap")})",
-                        "ENT" => "Kill Heli/Bradley",
-                        "BRUH" => "Killed by Heli/NPC",
-                        "WHY" => $"Animal kill >{Configuration.AnimalKillDistance}m ({(Configuration.AnimalKillCap > 0 ? $"max {Configuration.AnimalKillCap}" : "no cap")})",
-                        _ => rule.Key
-                    };
+                        case "KILL":
+                            friendly = lang.GetMessage("Kill_Friendly", this, langCode);
+                            break;
 
-                    AddCuiLabel(container, scrollView, $"{col2Min} {y - colRowHeight}", $"{col2Max} {y}", $"• {friendly}: {rule.Value} pts", 13);
+                        case "DEAD":
+                            friendly = lang.GetMessage("Dead_Friendly", this, langCode);
+                            break;
 
+                        case "JOKE":
+                            friendly = lang.GetMessage("Joke_Friendly", this, langCode);
+                            break;
+
+                        case "NPC":
+                            var npcCap = Configuration.NpcKillCap > 0
+                                ? string.Format(lang.GetMessage("MaxCapFormat", this, langCode), Configuration.NpcKillCap)
+                                : lang.GetMessage("NoCap", this, langCode);
+                            friendly = string.Format(lang.GetMessage("NpcLabelFormat", this, langCode), npcCap);
+                            break;
+
+                        case "ENT":
+                            friendly = lang.GetMessage("Ent_Friendly", this, langCode);
+                            break;
+
+                        case "BRUH":
+                            friendly = lang.GetMessage("Bruh_Friendly", this, langCode);
+                            break;
+
+                        case "WHY":
+                            var animalCap = Configuration.AnimalKillCap > 0
+                                ? string.Format(lang.GetMessage("MaxCapFormat", this, langCode), Configuration.AnimalKillCap)
+                                : lang.GetMessage("NoCap", this, langCode);
+                            friendly = string.Format(
+                                lang.GetMessage("AnimalKillFormat", this, langCode),
+                                Configuration.AnimalKillDistance,
+                                animalCap
+                            );
+                            break;
+
+                        default:
+                            friendly = rule.Key;
+                            break;
+                    }
+
+                    AddCuiLabel(
+                        container, scrollView,
+                        $"{col2Min} {y - colRowHeight}",
+                        $"{col2Max} {y}",
+                        $"• {friendly}: {rule.Value} pts",
+                        13
+                    );
                 }
 
                 if (i < Configuration.KitPrices.Count)
                 {
-                    var kit = Configuration.KitPrices.ElementAt(i);
-                    AddCuiLabel(container, scrollView, $"{col3Min} {y - colRowHeight}", $"{col3Max} {y}", $"• {kit.Key} Kit: {kit.Value} pts", 13);
+                    var kit      = Configuration.KitPrices.ElementAt(i);
+                    var text     = string.Format(lang.GetMessage("Kit_Label", this, langCode),
+                                                 kit.Key, kit.Value);
 
+                    AddCuiLabel(container, scrollView,
+                                $"{col3Min} {y - colRowHeight}",
+                                $"{col3Max} {y}",
+                                $"• {text}",
+                                13);
                 }
 
                 y -= colRowSize;
             }
 
-            string toggleLabel = welcomeOptOut.Contains(player.userID) ? "Show next time" : "Don’t show again";
+            string toggleLabel = welcomeOptOut.Contains(player.userID)
+                ? lang.GetMessage("Toggle_ShowNextTime", this, langCode)
+                : lang.GetMessage("Toggle_DontShowAgain", this, langCode);
+
             string toggleCommand = $"welcomeui_toggle {player.userID}";
             container.Add(new CuiButton
             {
@@ -566,11 +666,11 @@ namespace Oxide.Plugins
                 Text = { Text = toggleLabel, FontSize = 12, Align = TextAnchor.MiddleCenter }
             }, $"{WelcomeUiPanelName}.main");
 
-            AddCuiButton(container, $"{WelcomeUiPanelName}.main", "0.51 0.01", "0.65 0.06", "Close", "welcomeui_close", "0.7 0.2 0.2 1");
+            AddCuiButton(container, $"{WelcomeUiPanelName}.main", "0.51 0.01", "0.65 0.06", lang.GetMessage("Button_Close", this, langCode), "welcomeui_close", "0.7 0.2 0.2 1");
             
             y -= 0.07f;
 
-            AddTextBlock("You can use commands such as /help_tournament to learn more.");
+            AddTextBlock(lang.GetMessage("HelpCommands_Text", this, langCode));
             
             var pluginTitles = Interface.Oxide.RootPluginManager
                 .GetPlugins()
@@ -579,7 +679,7 @@ namespace Oxide.Plugins
                 .Distinct();
             var pluginList = string.Join(", ", pluginTitles);
 
-            AddTextBlock($"Available plugins: {pluginList}");
+            AddTextBlock($"Plugins: {pluginList}");
 
             CuiHelper.AddUi(player, container);
 
@@ -984,10 +1084,10 @@ namespace Oxide.Plugins
             ApplyConfiguration();
 
             CloseConfigUI(player);
-			if (Configuration.AutoStartEnabled)
-			{
-				ScheduleTournament();
-			}
+            if (Configuration.AutoStartEnabled)
+            {
+                ScheduleTournament();
+            }
 
         }
         
@@ -1026,8 +1126,18 @@ namespace Oxide.Plugins
             ValidateConfiguration();
             NormaliseKitPrices();
             LoadAutoEnrollBlacklist();
+            
             LoadParticipantsData();
             LoadTeamLeaderNames();
+            
+            bool anyNamedParticipant = participantsData.Values
+                                 .Any(p => !string.Equals(p.Name, "Unknown", StringComparison.OrdinalIgnoreCase));
+            if (anyNamedParticipant && !hasRebuiltCaps)
+            {
+                RebuildKillCapsFromHistory();
+                hasRebuiltCaps = true;
+            }
+            
             ResumeInterruptedTournament();
             if (!isTournamentRunning)
                 ScheduleTournament();
@@ -1283,6 +1393,8 @@ namespace Oxide.Plugins
             Puts($"[RustRoyale] Current plugin version: {currentVersion}");
 
             Puts("[RustRoyale] Checking remote plugin for updates...");
+            
+            lang = Interface.Oxide.GetLibrary<Lang>();
 
             webrequest.Enqueue(PluginUpdateUrl, null, (code, response) =>
             {
@@ -1339,12 +1451,7 @@ namespace Oxide.Plugins
             {
                 OnPlayerInit(player);
             }
-            
-             if (!isTournamentRunning)
-            {
-                RebuildKillCapsFromHistory();
-            }
-            
+
         }
     #endregion
     #region Schedule Tournament
@@ -1604,72 +1711,72 @@ namespace Oxide.Plugins
         }
 
         private void ResumeInterruptedTournament()
-		{
-			EnsureDataDirectory();
+        {
+            EnsureDataDirectory();
 
-			string latestFile = null;
-			foreach (var file in Directory.EnumerateFiles(DataDirectory, "Tournament_*.data"))
-			{
-				if (latestFile == null ||
-					string.Compare(Path.GetFileName(file), Path.GetFileName(latestFile), StringComparison.Ordinal) > 0)
-				{
-					latestFile = file;
-				}
-			}
+            string latestFile = null;
+            foreach (var file in Directory.EnumerateFiles(DataDirectory, "Tournament_*.data"))
+            {
+                if (latestFile == null ||
+                    string.Compare(Path.GetFileName(file), Path.GetFileName(latestFile), StringComparison.Ordinal) > 0)
+                {
+                    latestFile = file;
+                }
+            }
 
-			if (latestFile == null)
-				return;
+            if (latestFile == null)
+                return;
 
-			var lines = File.ReadAllLines(latestFile);
+            var lines = File.ReadAllLines(latestFile);
 
-			if (lines.Any(l => l.Contains("Tournament ended successfully.")))
-			{
-				Puts($"[RustRoyale] Found latest tournament file {Path.GetFileName(latestFile)} already marked as completed.");
-				
-				isTournamentRunning = false;
-				return;
-			}
+            if (lines.Any(l => l.Contains("Tournament ended successfully.")))
+            {
+                Puts($"[RustRoyale] Found latest tournament file {Path.GetFileName(latestFile)} already marked as completed.");
+                
+                isTournamentRunning = false;
+                return;
+            }
 
-			Puts($"[Info] Resuming interrupted tournament from log: {Path.GetFileName(latestFile)}");
-			currentTournamentFile = latestFile;
+            Puts($"[Info] Resuming interrupted tournament from log: {Path.GetFileName(latestFile)}");
+            currentTournamentFile = latestFile;
 
-			var stamp = Path.GetFileNameWithoutExtension(latestFile).Split('_')[1];
-			var startUtc = DateTime.ParseExact(
-				stamp,
-				"yyyyMMddHHmmss",
-				CultureInfo.InvariantCulture,
-				DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal
-			);
+            var stamp = Path.GetFileNameWithoutExtension(latestFile).Split('_')[1];
+            var startUtc = DateTime.ParseExact(
+                stamp,
+                "yyyyMMddHHmmss",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal
+            );
 
-			tournamentStartTime = startUtc;
-			tournamentEndTime = startUtc.AddHours(Configuration.DurationHours);
-			isTournamentRunning = true;
+            tournamentStartTime = startUtc;
+            tournamentEndTime = startUtc.AddHours(Configuration.DurationHours);
+            isTournamentRunning = true;
 
-			if (DateTime.UtcNow >= tournamentEndTime)
-			{
-				EndTournament();
-			}
-			else
-			{
-				ScheduleTournamentEnd();
+            if (DateTime.UtcNow >= tournamentEndTime)
+            {
+                EndTournament();
+            }
+            else
+            {
+                ScheduleTournamentEnd();
 
-				TimeSpan remaining = tournamentEndTime - DateTime.UtcNow;
+                TimeSpan remaining = tournamentEndTime - DateTime.UtcNow;
 
-				var tokens = new Dictionary<string, string>
-				{
-					{ "TimeRemaining", FormatTimeRemaining(remaining) },
-					{ "Duration", Configuration.DurationHours.ToString() }
-				};
+                var tokens = new Dictionary<string, string>
+                {
+                    { "TimeRemaining", FormatTimeRemaining(remaining) },
+                    { "Duration", Configuration.DurationHours.ToString() }
+                };
 
-				var msg = Lang("ResumeTournament", null, tokens);
-				SendTournamentMessage(msg);
+                var msg = Lang("ResumeTournament", null, tokens);
+                SendTournamentMessage(msg);
 
-				if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-				{
-					SendDiscordMessage(msg);
-				}
-			}
-		}
+                if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
+                {
+                    SendDiscordMessage(msg);
+                }
+            }
+        }
     
         [ChatCommand("start_tournament")]
         private void StartTournamentCommand(BasePlayer player, string command, string[] args)
@@ -1926,15 +2033,36 @@ namespace Oxide.Plugins
         {
             if (!initialized)
                 return;
+            
+            if (participantsData.TryGetValue(player.userID, out var participant) && participant.Name == "Unknown")
+            {
+                participant.Name = player.displayName;
+                SaveParticipantsData();
+                Puts($"Updated participant data: {player.userID} now has name '{player.displayName}'.");
+            }
+            
+            if (!hasRebuiltCaps)
+            {
+                RebuildKillCapsFromHistory();
+                hasRebuiltCaps = true;
+            }
 
             if (!playerLanguages.ContainsKey(player.userID))
             {
-                string lang = player.net?.connection?.info?.GetString("lang")?.ToLower();
-                if (!string.IsNullOrEmpty(lang) && Translations.ContainsKey(lang))
+                var raw = player.net?.connection?.info?.GetString("global.language", Configuration.DefaultLanguage);
+                if (!string.IsNullOrEmpty(raw))
                 {
-                    playerLanguages[player.userID] = lang;
-                    SavePlayerLanguages();
-                    Puts($"[Debug] Detected language '{lang}' for {player.displayName}.");
+                    var code = raw.Split(new[] { '-', '_' }, StringSplitOptions.RemoveEmptyEntries)[0].ToLowerInvariant();
+                    if (Translations.ContainsKey(code))
+                    {
+                        playerLanguages[player.userID] = code;
+                        SavePlayerLanguages();
+                        Puts($"[Debug] Detected language '{code}' for {player.displayName}.");
+                    }
+                    else
+                    {
+                        Puts($"[Debug] Client requested unsupported language '{raw}', falling back to '{Configuration.DefaultLanguage}'.");
+                    }
                 }
             }
 
@@ -1953,13 +2081,6 @@ namespace Oxide.Plugins
                     SaveTeamLeaderNames();
                     Puts($"[Debug] Cached leader name '{player.displayName}' for team {player.currentTeam}");
                 }
-            }
-
-            if (participantsData.TryGetValue(player.userID, out var participant) && participant.Name == "Unknown")
-            {
-                participant.Name = player.displayName;
-                SaveParticipantsData();
-                Puts($"Updated participant data: {player.userID} now has name '{player.displayName}'.");
             }
 
             if (Configuration.AutoEnrollEnabled && !autoEnrollBlacklist.Contains(player.userID) && !participantsData.ContainsKey(player.userID))
@@ -2129,11 +2250,11 @@ namespace Oxide.Plugins
 
             if (HandleHeliOrBradleyKill(victim, entity, info)) return;
             if (HandleNpcOrUnownedEntityKill(victim, attacker, entity, info)) return;
-            if (HandlePlayerKill(victim, attacker, info)) return;
             if (HandleTrapKill(victim, entity, info)) return;
             if (HandleNpcKilledByPlayer(victim, attacker, info)) return;
             if (HandleNpcKilledByTrap(victim, entity, info)) return;
             if (HandleSelfInflicted(victim, attacker, info)) return;
+            if (HandlePlayerKill(victim, attacker, info)) return;
 
             Puts($"[Debug] ❌ No handler matched for {victim.displayName}'s death. Entity: {entity?.ShortPrefabName ?? "unknown"}");
             lastDamageRecords.Remove(victim.userID);
@@ -2253,7 +2374,6 @@ namespace Oxide.Plugins
             ulong ownerId = entity.OwnerID;
             string ownerName = ownerId != 0 ? GetPlayerName(ownerId) : "Unknown";
 
-            // Case 1: Player killed by their own trap
             if (ownerId == victim.userID)
             {
                 if (!IsActionCodeDisabled("BRUH"))
@@ -2265,7 +2385,6 @@ namespace Oxide.Plugins
                 }
             }
 
-            // Case 2: Trap has a different owner who is a participant
             if (ownerId != 0 && participants.Contains(ownerId))
             {
                 bool scored = false;
@@ -2292,7 +2411,6 @@ namespace Oxide.Plugins
                 return true;
             }
 
-            // Case 3: Unowned trap (or owner not a participant)
             if (!IsActionCodeDisabled("JOKE"))
             {
                 UpdatePlayerScore(victim.userID, "JOKE", $"death caused by an unowned {friendlyName}", victim, info, entityName: friendlyName);
@@ -2464,7 +2582,15 @@ namespace Oxide.Plugins
             {
                 string message = $"[Debug] {(player?.displayName ?? userId.ToString())} reached {label} cap ({cap}).";
                 Puts(message);
-                player?.ChatMessage($"You've reached the maximum allowed {label} kills for this tournament.");
+
+                var lang     = Interface.Oxide.GetLibrary<Lang>();
+                string langCode = player != null 
+                    ? lang.GetLanguage(player.UserIDString) 
+                    : "en";
+
+                string msg = string.Format(lang.GetMessage("MaxKillsReached", this, langCode), label);
+                player?.ChatMessage(msg);
+
                 return true;
             }
 
@@ -2477,43 +2603,66 @@ namespace Oxide.Plugins
             npcKillCounts.Clear();
             animalKillCounts.Clear();
 
-			var filePaths = Directory.GetFiles(DataDirectory, "Tournament_*.data")
-				.OrderByDescending(f => f)
-				.Take(1);
+            var filePaths = Directory
+                .GetFiles(DataDirectory, "Tournament_*.data")
+                .OrderByDescending(f => f)
+                .Take(1);
 
             foreach (var path in filePaths)
-			{
-				try
-				{
-					var lines = File.ReadAllLines(path);
-					foreach (var line in lines)
-					{
-						if (!line.Contains("[Event]") || !line.Contains(" received ")) 
-							continue;
+            {
+                Puts($"[RustRoyale] Attempting to rebuild kill caps from: {Path.GetFileName(path)}");
+                try
+                {
+                    var lines = File.ReadAllLines(path);
+                    foreach (var line in lines)
+                    {
+                        if (!line.Contains("[Event]") || !line.Contains(" received "))
+                            continue;
 
-						// split out attackerId and the rest of the payload
-						var parts = line.Split(new[] { "[Event]", " received " }, StringSplitOptions.None);
-						if (parts.Length < 2) continue;
+                        var partsAfterEvent = line.Split(new[] { "[Event]" }, StringSplitOptions.None);
+                        if (partsAfterEvent.Length < 2)
+                            continue;
 
-						// parts[1] is like "7656119… received 1 point for eliminating an NPC"
-						var payload = parts[1].Trim();
-						var tokens = payload.Split(' ');
-						if (!ulong.TryParse(tokens[0], out var attackerId))
-							continue;
+                        string afterEvent = partsAfterEvent[1].Trim();
 
-						if (payload.Contains("eliminating an NPC"))
-							npcKillCounts[attackerId] = npcKillCounts.GetValueOrDefault(attackerId) + 1;
-						else if (payload.Contains("killing an animal"))
-							animalKillCounts[attackerId] = animalKillCounts.GetValueOrDefault(attackerId) + 1;
-					}
+                        var partsReceived = afterEvent.Split(new[] { " received " }, StringSplitOptions.None);
+                        if (partsReceived.Length < 2)
+                            continue;
 
-					Puts($"[RustRoyale] Restored kill caps from {path}: {npcKillCounts.Count} NPC, {animalKillCounts.Count} animals.");
-				}
-				catch (Exception ex)
-				{
-					PrintError($"[RustRoyale] Failed to rebuild kill caps from {path}: {ex.Message}");
-				}
-			}
+                        string nameToken = partsReceived[0].Trim();
+                        string restOfPayload = partsReceived[1].Trim();
+
+                        ulong attackerId = 0UL;
+                        foreach (var kvp in participantsData)
+                        {
+                            if (kvp.Value.Name.Equals(nameToken, StringComparison.OrdinalIgnoreCase))
+                            {
+                                attackerId = kvp.Key;
+                                break;
+                            }
+                        }
+
+                        if (attackerId == 0UL)
+                            continue;
+
+                        if (restOfPayload.Contains("eliminating "))
+                        {
+                            npcKillCounts[attackerId] = npcKillCounts.GetValueOrDefault(attackerId) + 1;
+                        }
+                        else if (restOfPayload.Contains("killing a "))
+                        {
+                            animalKillCounts[attackerId] = animalKillCounts.GetValueOrDefault(attackerId) + 1;
+                        }
+                    }
+
+                    Puts($"[RustRoyale] Restored kill caps from {Path.GetFileName(path)}: " +
+                         $"{npcKillCounts.Count} NPC killers, {animalKillCounts.Count} animal killers.");
+                }
+                catch (Exception ex)
+                {
+                    PrintError($"[RustRoyale] Failed to rebuild kill caps from {path}: {ex.Message}");
+                }
+            }
         }
     #endregion
     #region Score Handling
@@ -2744,17 +2893,24 @@ namespace Oxide.Plugins
 
             string pluralS = Math.Abs(points) == 1 ? "" : "s";
 
-            string templateKey = reverseMessage ? "KillPlayerWithEntity" : actionCode switch
-            {
-                "KILL" => "KillPlayerWithEntity",
-                "DEAD" => "KilledByPlayer",
-                "JOKE" => "SelfInflictedDeath",
-                "NPC" => "KillNPC",
-                "ENT" => "KillEntity",
-                "BRUH" => "DeathByBRUH",
-                "WHY" => "KillAnimal",
-                _ => "PlayerScoreUpdate"
-            };
+            var lang = this.lang;
+            string langCode = lang.GetLanguage(userId.ToString());
+
+            BasePlayer playerObj = BasePlayer.FindByID(userId);
+
+            string templateKey = reverseMessage
+                ? "KillPlayerWithEntity"
+                : actionCode switch
+                {
+                    "KILL" => "KillPlayerWithEntity",
+                    "DEAD" => "KilledByPlayer",
+                    "JOKE" => "SelfInflictedDeath",
+                    "NPC"  => "KillNPC",
+                    "ENT"  => "KillEntity",
+                    "BRUH" => "DeathByBRUH",
+                    "WHY"  => "KillAnimal",
+                    _      => "PlayerScoreUpdate"
+                };
 
             attackerName ??= GetPlayerName(userId);
 
@@ -2767,28 +2923,30 @@ namespace Oxide.Plugins
                 }
             }
 
-            string articleEntityName = WithIndefiniteArticle(entityName);
+            string articleEntityName = WithIndefiniteArticle(entityName, langCode);
 
             var placeholders = new Dictionary<string, string>
             {
-                { "PlayerName", GetPlayerName(userId) },
-                { "VictimName", victim?.displayName ?? "Unknown" },
-                { "AttackerName", attackerName },
-                { "EntityName", entityName },
-                { "ArticleEntityName", WithIndefiniteArticle(entityName) },
-                { "AttackerType", WithIndefiniteArticle(entityName) },
-                { "Score", points.ToString() },
-                { "TotalScore", participant.Score.ToString() },
-                { "Action", actionDescription },
-                { "PluralS", pluralS }
+                { "PlayerName",        GetPlayerName(userId) },
+                { "VictimName",        victim?.displayName ?? lang.GetMessage("UnknownEntity", this, langCode) },
+                { "AttackerName",      attackerName },
+                { "EntityName",        entityName },
+                { "ArticleEntityName", articleEntityName },
+                { "AttackerType",      WithIndefiniteArticle(entityName, langCode) },
+                { "Score",             points.ToString() },
+                { "TotalScore",        participant.Score.ToString() },
+                { "Action",            actionDescription },
+                { "PluralS",           pluralS }
             };
 
             if (actionCode == "WHY")
             {
-                placeholders["Distance"] = distance.HasValue ? distance.Value.ToString("F1") : Configuration.AnimalKillDistance.ToString();
+                placeholders["Distance"] = distance.HasValue
+                    ? distance.Value.ToString("F1")
+                    : Configuration.AnimalKillDistance.ToString();
             }
 
-            string globalMessage = Lang(templateKey, null, placeholders);
+            string globalMessage = Lang(templateKey, playerObj, placeholders);
 
             SendTournamentMessage(globalMessage);
             if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
