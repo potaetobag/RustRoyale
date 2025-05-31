@@ -73,5 +73,6 @@
   "Toggle_ShowNextTime": "Afficher la prochaine fois",
   "Toggle_DontShowAgain": "Ne plus afficher",
   "Button_Close": "Fermer",
-  "ArticleTemplate": "une {0}"
+  "ArticleTemplate": "une {0}",
+  "MaxKillsReached": "Vous avez atteint le nombre maximal de {0} éliminations autorisées pour ce tournoi."
 }
