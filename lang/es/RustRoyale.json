@@ -72,5 +72,6 @@
     "HelpCommands_Text": "Puedes usar comandos como /help_tournament para obtener más información.",
     "Toggle_ShowNextTime": "Mostrar la próxima vez",
     "Toggle_DontShowAgain": "No mostrar de nuevo",
-    "Button_Close": "Cerrar"
+    "Button_Close": "Cerrar",
+    "ArticleTemplate": "un {0}"
 }
