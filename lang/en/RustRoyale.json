@@ -75,5 +75,6 @@
   "Button_Close": "Close",
   "ArticleTemplate": "{0}",
   "ArticleTemplateAE": "an {0}",
-  "ArticleTemplateA": "a {0}"
+  "ArticleTemplateA": "a {0}",
+  "MaxKillsReached": "You’ve reached the maximum allowed {0} kills for this tournament."
 }
