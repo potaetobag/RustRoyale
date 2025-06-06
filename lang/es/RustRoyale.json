@@ -74,5 +74,6 @@
     "Toggle_DontShowAgain": "No mostrar de nuevo",
     "Button_Close": "Cerrar",
     "ArticleTemplate": "un {0}",
-    "MaxKillsReached": "Llegaste al máximo de {0} muertes permitidas pa’ este torneo."
+    "MaxKillsReached": "Llegaste al máximo de {0} muertes permitidas pa’ este torneo.",
+    "TournamentAboutToStartDiscord": "El torneo está a punto de comenzar en {Time}. ¡No te lo pierdas!"
 }
