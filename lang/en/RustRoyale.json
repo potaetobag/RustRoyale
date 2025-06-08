@@ -69,6 +69,7 @@
   "NotAvailable": "N/A",
   "Participants_Label": "Participants: {0}",
   "Kit_Label": "Kit {0}: {1} pts",
+  "ScoreRuleLine": "• {0}: {1} pts",
   "HelpCommands_Text": "You can use commands such as /help_tournament to learn more.",
   "Toggle_ShowNextTime": "Show next time",
   "Toggle_DontShowAgain": "Don’t show again",
