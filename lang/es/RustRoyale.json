@@ -76,5 +76,8 @@
     "Button_Close": "Cerrar",
     "ArticleTemplate": "un {0}",
     "MaxKillsReached": "Llegaste al máximo de {0} muertes permitidas pa’ este torneo.",
-    "TournamentAboutToStartDiscord": "El torneo está a punto de comenzar en {Time}. ¡No te lo pierdas!"
+    "TournamentAboutToStartDiscord": "El torneo está a punto de comenzar en {Time}. ¡No te lo pierdas!",
+    "StatsHeader": "Estadísticas del torneo:",
+    "RulesHeader": "Reglas de puntuación del torneo:",
+    "KitPricesHeader": "Precios de kits:"
 }
