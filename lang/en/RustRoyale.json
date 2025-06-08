@@ -78,5 +78,8 @@
   "ArticleTemplateAE": "an {0}",
   "ArticleTemplateA": "a {0}",
   "MaxKillsReached": "You’ve reached the maximum allowed {0} kills for this tournament.",
-  "TournamentAboutToStartDiscord": "The tournament is about to start in {Time}. Don't miss it!"
+  "TournamentAboutToStartDiscord": "The tournament is about to start in {Time}. Don't miss it!",
+  "StatsHeader": "Tournament Stats:",
+  "RulesHeader": "Tournament Scoring Rules:",
+  "KitPricesHeader": "Kit Prices:"
 }
