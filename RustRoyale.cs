@@ -16,7 +16,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.2.9"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.3.0"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
         private bool initialized = false;
@@ -465,25 +465,24 @@ namespace Oxide.Plugins
         {
             CuiHelper.DestroyUi(player, WelcomeUiPanelName);
             var container = new CuiElementContainer();
-            string langCode = lang.GetLanguage(player.UserIDString);
 
             container.Add(new CuiPanel
             {
-                Image = { Color = "0 0 0 0.6" },
+                Image        = { Color = "0 0 0 0.6" },
                 RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
                 CursorEnabled = true
             }, "Overlay", WelcomeUiPanelName);
 
             container.Add(new CuiPanel
             {
-                Image = { Color = "0.1 0.1 0.1 0.95" },
+                Image        = { Color = "0.1 0.1 0.1 0.95" },
                 RectTransform = { AnchorMin = "0.15 0.1", AnchorMax = "0.85 0.9" }
             }, WelcomeUiPanelName, $"{WelcomeUiPanelName}.main");
 
             string scrollView = $"{WelcomeUiPanelName}.scroll";
             container.Add(new CuiElement
             {
-                Name = scrollView,
+                Name   = scrollView,
                 Parent = $"{WelcomeUiPanelName}.main",
                 Components =
                 {
@@ -493,196 +492,187 @@ namespace Oxide.Plugins
             });
 
             float y = 0.95f;
-
             void AddTextBlock(string text, int size = 14)
             {
                 container.Add(new CuiLabel
                 {
                     RectTransform = { AnchorMin = $"0 {y - 0.18f}", AnchorMax = $"1 {y}" },
-                    Text = { Text = text, FontSize = size, Align = TextAnchor.UpperLeft }
+                    Text          = { Text = text, FontSize = size, Align = TextAnchor.UpperLeft }
                 }, scrollView);
                 y -= 0.06f;
             }
 
-            AddCuiRawImage(container, scrollView, "0.4 0.91", "0.6 0.98", "https://panels.twitch.tv/panel-1025512005-image-9ae6176b-7901-47e0-a0a2-2c16fed78df3");
-            
+            AddCuiRawImage(container, scrollView,
+                           "0.4 0.91", "0.6 0.98",
+                           "https://panels.twitch.tv/panel-1025512005-image-9ae6176b-7901-47e0-a0a2-2c16fed78df3");
             y -= 0.07f;
 
-            AddTextBlock(Lang("WelcomeTitle", player), 18);
+            AddTextBlock(Lang("WelcomeTitle",       player), 18);
             AddTextBlock(Lang("WelcomeDescription", player));
             y -= 0.1f;
-            AddTextBlock(Lang("WelcomeDiscord", player));
-
+            AddTextBlock(Lang("WelcomeDiscord",     player));
             y -= 0.05f;
 
-            float baseY = y;
-            float colRowHeight = 0.035f;
-            float colRowGap = 0.005f;
-            float colRowSize = colRowHeight + colRowGap;
-            int maxRows = Math.Max(Math.Max(3, Configuration.ScoreRules.Count), Configuration.KitPrices.Count);
+            float baseY    = y;
+            float colH     = 0.035f;
+            float colGap   = 0.005f;
+            float rowSize  = colH + colGap;
+            int   maxRows  = Math.Max(Math.Max(3, Configuration.ScoreRules.Count), Configuration.KitPrices.Count);
 
-            float col1Min = 0f, col1Max = 0.32f;
+            float col1Min = 0f,    col1Max = 0.32f;
             float col2Min = 0.34f, col2Max = 0.66f;
             float col3Min = 0.68f, col3Max = 1f;
 
-            AddCuiLabel(container, scrollView, $"{col1Min} {baseY}", $"{col1Max} {baseY + colRowHeight}", "<b>Tournament Stats:</b>");
+            AddCuiLabel(container, scrollView,
+                        $"{col1Min} {baseY}", $"{col1Max} {baseY + colH}",
+                        $"<b>{Lang("StatsHeader",      player)}</b>");
+            AddCuiLabel(container, scrollView,
+                        $"{col2Min} {baseY}", $"{col2Max} {baseY + colH}",
+                        $"<b>{Lang("RulesHeader",      player)}</b>");
+            AddCuiLabel(container, scrollView,
+                        $"{col3Min} {baseY}", $"{col3Max} {baseY + colH}",
+                        $"<b>{Lang("KitPricesHeader",  player)}</b>");
 
-            AddCuiLabel(container, scrollView, $"{col2Min} {baseY}", $"{col2Max} {baseY + colRowHeight}", "<b>Scoring Rules:</b>");
-
-            AddCuiLabel(container, scrollView, $"{col3Min} {baseY}", $"{col3Max} {baseY + colRowHeight}", "<b>Kit Prices:</b>");
-
-            y = baseY - colRowSize;
+            y = baseY - rowSize;
 
             for (int i = 0; i < maxRows; i++)
             {
                 if (i < 3)
                 {
-                    string text;
-
-                    switch (i)
+                    string statText = "";
+                    if (i == 0)
                     {
-                        case 0:
-                            text = string.Format(lang.GetMessage("Duration_Label", this, langCode),
-                                                 Configuration.DurationHours);
-                            break;
+                        statText = string.Format(
+                            Lang("Duration_Label", player),
+                            Configuration.DurationHours);
+                    }
+                    else if (i == 1)
+                    {
+                        string timeLeft;
+                        if (tournamentStartTime > DateTime.MinValue)
+                        {
+                            var end  = tournamentStartTime.AddHours(Configuration.DurationHours);
+                            var span = end - DateTime.UtcNow;
+                            timeLeft = span.TotalSeconds > 0
+                                       ? $"{(int)span.TotalHours}h {span.Minutes}m"
+                                       : Lang("TournamentEnded", player);
+                        }
+                        else timeLeft = Lang("NotAvailable", player);
 
-                        case 1:
-                            string timeLeft;
-                            if (tournamentStartTime > DateTime.MinValue)
-                            {
-                                var endTime   = tournamentStartTime.AddHours(Configuration.DurationHours);
-                                var remaining = endTime - DateTime.UtcNow;
-                                timeLeft = remaining.TotalSeconds > 0
-                                    ? $"{(int)remaining.TotalHours}h {remaining.Minutes}m"
-                                    : lang.GetMessage("TournamentEnded", this, langCode);
-                            }
-                            else timeLeft = lang.GetMessage("NotAvailable", this, langCode);
-
-                            text = string.Format(lang.GetMessage("TimeLeft_Label", this, langCode),
-                                                 timeLeft);
-                            break;
-
-                        case 2:
-                            text = string.Format(lang.GetMessage("Participants_Label", this, langCode),
-                                                 participants.Count);
-                            break;
-
-                        default:
-                            text = string.Empty;
-                            break;
+                        statText = string.Format(
+                            Lang("TimeLeft_Label", player),
+                            timeLeft);
+                    }
+                    else if (i == 2)
+                    {
+                        statText = string.Format(
+                            Lang("Participants_Label", player),
+                            participants.Count);
                     }
 
                     AddCuiLabel(container, scrollView,
-                                $"{col1Min} {y - colRowHeight}",
-                                $"{col1Max} {y}",
-                                $"• {text}",
-                                13);
+                                $"{col1Min} {y - colH}", $"{col1Max} {y}",
+                                $"• {statText}", 13);
                 }
-                
+
                 if (i < Configuration.ScoreRules.Count)
                 {
-                    var rule     = Configuration.ScoreRules.ElementAt(i);
-                    string friendly;
+                    var kv       = Configuration.ScoreRules.ElementAt(i);
+                    string key   = kv.Key;
+                    int    value = kv.Value;
+                    string friendly = "";
+                    string cap      = "";
 
-                    switch (rule.Key)
+                    switch (key)
                     {
                         case "KILL":
-                            friendly = lang.GetMessage("Kill_Friendly", this, langCode);
+                            friendly = Lang("Kill_Friendly", player);
                             break;
-
                         case "DEAD":
-                            friendly = lang.GetMessage("Dead_Friendly", this, langCode);
+                            friendly = Lang("Dead_Friendly", player);
                             break;
-
                         case "JOKE":
-                            friendly = lang.GetMessage("Joke_Friendly", this, langCode);
+                            friendly = Lang("Joke_Friendly", player);
                             break;
-
-                        case "NPC":
-                            var npcCap = Configuration.NpcKillCap > 0
-                                ? string.Format(lang.GetMessage("MaxCapFormat", this, langCode), Configuration.NpcKillCap)
-                                : lang.GetMessage("NoCap", this, langCode);
-                            friendly = string.Format(lang.GetMessage("NpcLabelFormat", this, langCode), npcCap);
-                            break;
-
                         case "ENT":
-                            friendly = lang.GetMessage("Ent_Friendly", this, langCode);
+                            friendly = Lang("Ent_Friendly", player);
                             break;
-
                         case "BRUH":
-                            friendly = lang.GetMessage("Bruh_Friendly", this, langCode);
+                            friendly = Lang("Bruh_Friendly", player);
                             break;
-
+                        case "NPC":
+                            if (Configuration.NpcKillCap > 0)
+                                cap = string.Format(Lang("MaxCapFormat", player), Configuration.NpcKillCap);
+                            else
+                                cap = Lang("NoCap", player);
+                            friendly = string.Format(Lang("NpcLabelFormat", player), cap);
+                            break;
                         case "WHY":
-                            var animalCap = Configuration.AnimalKillCap > 0
-                                ? string.Format(lang.GetMessage("MaxCapFormat", this, langCode), Configuration.AnimalKillCap)
-                                : lang.GetMessage("NoCap", this, langCode);
+                            if (Configuration.AnimalKillCap > 0)
+                                cap = string.Format(Lang("MaxCapFormat", player), Configuration.AnimalKillCap);
+                            else
+                                cap = Lang("NoCap", player);
                             friendly = string.Format(
-                                lang.GetMessage("AnimalKillFormat", this, langCode),
-                                Configuration.AnimalKillDistance,
-                                animalCap
-                            );
+                                Lang("AnimalKillFormat", player),
+                                Configuration.AnimalKillDistance, cap);
                             break;
-
                         default:
-                            friendly = rule.Key;
+                            friendly = key;
                             break;
                     }
 
-                    AddCuiLabel(
-                        container, scrollView,
-                        $"{col2Min} {y - colRowHeight}",
-                        $"{col2Max} {y}",
-                        $"• {friendly}: {rule.Value} pts",
-                        13
-                    );
+                    string tpl      = Lang("ScoreRuleLine", player);
+                    string lineText = string.Format(tpl, friendly, value);
+
+                    AddCuiLabel(container, scrollView,
+                                $"{col2Min} {y - colH}", $"{col2Max} {y}",
+                                lineText, 13);
                 }
 
                 if (i < Configuration.KitPrices.Count)
                 {
-                    var kit      = Configuration.KitPrices.ElementAt(i);
-                    var text     = string.Format(lang.GetMessage("Kit_Label", this, langCode),
-                                                 kit.Key, kit.Value);
+                    var kit = Configuration.KitPrices.ElementAt(i);
+                    string kitName = Lang($"Kit_{kit.Key}", player) ?? kit.Key;
+                    string tpl     = Lang("Kit_Label", player);
+                    string text    = string.Format(tpl, kitName, kit.Value);
 
                     AddCuiLabel(container, scrollView,
-                                $"{col3Min} {y - colRowHeight}",
-                                $"{col3Max} {y}",
-                                $"• {text}",
-                                13);
+                                $"{col3Min} {y - colH}", $"{col3Max} {y}",
+                                $"• {text}", 13);
                 }
 
-                y -= colRowSize;
+                y -= rowSize;
             }
 
             string toggleLabel = welcomeOptOut.Contains(player.userID)
-                ? lang.GetMessage("Toggle_ShowNextTime", this, langCode)
-                : lang.GetMessage("Toggle_DontShowAgain", this, langCode);
-
-            string toggleCommand = $"welcomeui_toggle {player.userID}";
+                ? Lang("Toggle_ShowNextTime", player)
+                : Lang("Toggle_DontShowAgain", player);
+            string toggleCmd   = $"welcomeui_toggle {player.userID}";
             container.Add(new CuiButton
             {
-                Button = { Command = toggleCommand, Color = "0.2 0.5 0.8 1" },
+                Button        = { Command = toggleCmd, Color = "0.2 0.5 0.8 1" },
                 RectTransform = { AnchorMin = "0.35 0.01", AnchorMax = "0.49 0.06" },
-                Text = { Text = toggleLabel, FontSize = 12, Align = TextAnchor.MiddleCenter }
+                Text          = { Text = toggleLabel, FontSize = 12, Align = TextAnchor.MiddleCenter }
             }, $"{WelcomeUiPanelName}.main");
 
-            AddCuiButton(container, $"{WelcomeUiPanelName}.main", "0.51 0.01", "0.65 0.06", lang.GetMessage("Button_Close", this, langCode), "welcomeui_close", "0.7 0.2 0.2 1");
-            
+            AddCuiButton(container, $"{WelcomeUiPanelName}.main",
+                         "0.51 0.01", "0.65 0.06",
+                         Lang("Button_Close", player),
+                         "welcomeui_close",
+                         "0.7 0.2 0.2 1");
+
             y -= 0.07f;
 
-            AddTextBlock(lang.GetMessage("HelpCommands_Text", this, langCode));
-            
-            var pluginTitles = Interface.Oxide.RootPluginManager
-                .GetPlugins()
-                .Select(p => p.Title)
-                .Where(t => !string.IsNullOrEmpty(t))
-                .Distinct();
-            var pluginList = string.Join(", ", pluginTitles);
+            AddTextBlock(Lang("HelpCommands_Text", player));
 
-            AddTextBlock($"Plugins: {pluginList}");
+            var pluginTitles = Interface.Oxide.RootPluginManager
+                                 .GetPlugins()
+                                 .Select(p => p.Title)
+                                 .Where(t => !string.IsNullOrEmpty(t))
+                                 .Distinct();
+            AddTextBlock($"Plugins: {string.Join(", ", pluginTitles)}");
 
             CuiHelper.AddUi(player, container);
-
         }
         
         [ConsoleCommand("welcomeui_close")]
@@ -1564,13 +1554,12 @@ namespace Oxide.Plugins
                     { "ActiveCount", activeCount.ToString() }
                 };
 
-                string message = Lang("ScheduleMessage", null, tokens);
-                SendTournamentMessage(message);
-
+                BroadcastLocalized("ScheduleMessage", tokens);
                 if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
                 {
-                    string discordMessage = Lang("ScheduleMessage", null, tokens);
-                    SendDiscordMessage(discordMessage);
+                    SendDiscordMessage(
+                        Lang("ScheduleMessage", null, tokens, Configuration.DefaultLanguage)
+                    );
                 }
 
                 ScheduleCountdown(tournamentStartTime, () =>
@@ -1630,21 +1619,17 @@ namespace Oxide.Plugins
                 Puts($"[Debug] Sending tournament countdown message: {formattedTime}");
 
                 string globalMessage = Lang("TournamentCountdown", null, tokens);
-                SendTournamentMessage(globalMessage);
+
+                BroadcastLocalized("TournamentCountdown", tokens);
 
                 Puts($"[Debug] Tournament countdown message sent to global chat: {globalMessage}");
 
-                Notify("TournamentCountdown", null, extraPlaceholders: tokens);
-
                 if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
                 {
-                    SendDiscordMessage(globalMessage);
-                    Puts($"[Debug] Discord countdown message sent: {globalMessage}");
+                    SendDiscordMessage(
+                        Lang("TournamentCountdown", null, tokens, Configuration.DefaultLanguage)
+                    );
                 }
-            }
-            else
-            {
-                // Puts($"[Debug] No notification sent for {remainingSeconds}s remaining. Last notified: {lastNotifiedMinutes}s");
             }
         }
 
@@ -1661,7 +1646,8 @@ namespace Oxide.Plugins
 
             if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
             {
-                string discordMessage = $"The tournament is about to start in {timeRemaining}. Don't miss it!";
+                var defaultLang = Configuration.DefaultLanguage;
+                string discordMessage = Lang("TournamentAboutToStartDiscord", null, tokens, defaultLang);
                 SendDiscordMessage(discordMessage);
                 Puts($"[Debug] Sending imminent start notification to Discord: {discordMessage}");
             }
@@ -1768,12 +1754,12 @@ namespace Oxide.Plugins
                     { "Duration", Configuration.DurationHours.ToString() }
                 };
 
-                var msg = Lang("ResumeTournament", null, tokens);
-                SendTournamentMessage(msg);
-
+                BroadcastLocalized("ResumeTournament", tokens);
                 if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
                 {
-                    SendDiscordMessage(msg);
+                    SendDiscordMessage(
+                        Lang("ResumeTournament", null, tokens, Configuration.DefaultLanguage)
+                    );
                 }
             }
         }
@@ -1867,17 +1853,16 @@ namespace Oxide.Plugins
 
                 ScheduleTournamentEnd();
 
-                string globalMessage = Lang("StartTournament", null, new Dictionary<string, string>
-                {
+                var startTokens = new Dictionary<string,string> {
                     { "TimeRemaining", FormatTimeRemaining(tournamentEndTime - DateTime.UtcNow) },
-                    { "Duration", Configuration.DurationHours.ToString() }
-                });
-                SendTournamentMessage(globalMessage);
-
+                    { "Duration",       Configuration.DurationHours.ToString()         }
+                };
+                BroadcastLocalized("StartTournament", startTokens);
                 if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
                 {
-                    Puts("[Debug] Sending Discord notification for tournament start.");
-                    SendDiscordMessage(globalMessage);
+                    SendDiscordMessage(
+                        Lang("StartTournament", null, startTokens, Configuration.DefaultLanguage)
+                    );
                 }
             }
             catch (Exception ex)
@@ -1917,117 +1902,124 @@ namespace Oxide.Plugins
         }
 
         private void EndTournament()
+        {
+            Puts("[Debug] EndTournament invoked.");
+
+            try
             {
-                Puts("[Debug] EndTournament invoked.");
-
-                try
+                if (!isTournamentRunning)
                 {
-                    if (!isTournamentRunning)
+                    Puts("[Debug] No tournament is currently running.");
+                    return;
+                }
+
+                isTournamentRunning = false;
+                Puts("RustRoyale: Tournament ended!");
+
+                var sortedParticipants = participantsData.Values
+                    .OrderByDescending(p => p.Score)
+                    .ToList();
+
+                SaveTournamentHistory(sortedParticipants);
+                LogEvent("Tournament ended successfully.");
+
+                string resultsMessage = "Leaderboard:\n";
+                if (sortedParticipants.Any())
+                {
+                    resultsMessage += string.Join("\n", sortedParticipants
+                        .Select((p, idx) => $"{idx + 1}. {p.Name} - {p.Score} Points"));
+                }
+                else
+                {
+                    resultsMessage += Lang("NoScoresInTournament");
+                }
+
+                var clanTotals = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                var groupNames = new Dictionary<string, string>();
+
+                foreach (var ps in participantsData.Values)
+                {
+                    string groupKey = GetGroupKey(ps.UserId);
+
+                    if (string.IsNullOrEmpty(groupKey) ||
+                        groupKey.Equals("default", StringComparison.OrdinalIgnoreCase) ||
+                        groupKey.Equals("No Group", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    string displayName = groupKey;
+
+                    if (ulong.TryParse(groupKey, out ulong teamId) &&
+                        RelationshipManager.ServerInstance.teams.ContainsKey(teamId))
                     {
-                        Puts("[Debug] No tournament is currently running.");
-                        return;
-                    }
-
-                    isTournamentRunning = false;
-                    Puts("RustRoyale: Tournament ended!");
-
-                    var sortedParticipants = participantsData.Values
-                        .OrderByDescending(p => p.Score)
-                        .ToList();
-
-                    SaveTournamentHistory(sortedParticipants);
-                    LogEvent("Tournament ended successfully.");
-
-                    string resultsMessage = "Leaderboard:\n";
-                    if (sortedParticipants.Any())
-                    {
-                        resultsMessage += string.Join("\n", sortedParticipants
-                            .Select((p, idx) => $"{idx + 1}. {p.Name} - {p.Score} Points"));
-                    }
-                    else
-                    {
-                        resultsMessage += Lang("NoScoresInTournament");
-                    }
-
-                    var clanTotals = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-                    var groupNames = new Dictionary<string, string>();
-
-                    foreach (var ps in participantsData.Values)
-                    {
-                        string groupKey = GetGroupKey(ps.UserId);
-
-                        if (string.IsNullOrEmpty(groupKey) ||
-                            groupKey.Equals("default", StringComparison.OrdinalIgnoreCase) ||
-                            groupKey.Equals("No Group", StringComparison.OrdinalIgnoreCase))
-                            continue;
-
-                        string displayName = groupKey;
-
-                        if (ulong.TryParse(groupKey, out ulong teamId) &&
-                            RelationshipManager.ServerInstance.teams.ContainsKey(teamId))
+                        if (teamLeaderNames.TryGetValue(teamId, out var cachedName))
                         {
-                            if (teamLeaderNames.TryGetValue(teamId, out var cachedName))
-                                {
-                                    displayName = $"{cachedName}'s team";
-                                }
-                                else
-                                {
-                                    displayName = $"Team {teamId}";
-                                }
+                            displayName = $"{cachedName}'s team";
                         }
-
-                        groupNames[groupKey] = displayName;
-
-                        if (!clanTotals.ContainsKey(groupKey))
-                            clanTotals[groupKey] = 0;
-
-                        clanTotals[groupKey] += ps.Score;
+                        else
+                        {
+                            displayName = $"Team {teamId}";
+                        }
                     }
 
-                    var topClans = clanTotals
-                        .OrderByDescending(kv => kv.Value)
-                        .Take(Configuration.TopClansToTrack)
-                        .ToList();
+                    groupNames[groupKey] = displayName;
 
-                    var globalMessage = new StringBuilder();
-                    globalMessage.AppendLine(Lang("EndTournament"));
-                    globalMessage.AppendLine();
-                    globalMessage.AppendLine(resultsMessage);
+                    if (!clanTotals.ContainsKey(groupKey))
+                        clanTotals[groupKey] = 0;
 
-                    if (topClans.Any())
-                    {
-                        globalMessage.AppendLine();
-                        globalMessage.AppendLine(Lang("TopClansHeader"));
-                        globalMessage.AppendLine(string.Join("\n", topClans
-                            .Select((kv, idx) =>
-                            {
-                                string name = groupNames.ContainsKey(kv.Key) ? groupNames[kv.Key] : kv.Key;
-                                return $"{idx + 1}. {name} ({kv.Value} pts)";
-                            })));
-                    }
-
-                    SendTournamentMessage(globalMessage.ToString().TrimEnd());
-                    if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-                        SendDiscordMessage(globalMessage.ToString().TrimEnd());
-
-                    Puts($"[Debug] Notifications sent for tournament end:\n{globalMessage}");
-                    Puts($"[Debug] Tournament successfully ended. Total participants: {sortedParticipants.Count}");
-
-                    foreach (var p in participantsData.Values)
-                        p.Score = 0;
-                    SaveParticipantsData();
-                    Puts("[Debug] All participant scores reset to 0 and saved at tournament end.");
-
-                    countdownTimer?.Destroy();
-                    countdownTimer = null;
-                    Puts("[Debug] Scheduling the next tournament.");
-                    ScheduleTournament();
+                    clanTotals[groupKey] += ps.Score;
                 }
-                catch (Exception ex)
+
+                var topClans = clanTotals
+                    .OrderByDescending(kv => kv.Value)
+                    .Take(Configuration.TopClansToTrack)
+                    .ToList();
+
+                var globalMessage = new StringBuilder();
+                globalMessage.AppendLine(Lang("EndTournament"));
+                globalMessage.AppendLine();
+                globalMessage.AppendLine(resultsMessage);
+
+                if (topClans.Any())
                 {
-                    PrintError($"Failed to end tournament: {ex.Message}");
+                    globalMessage.AppendLine();
+                    globalMessage.AppendLine(Lang("TopClansHeader"));
+                    globalMessage.AppendLine(string.Join("\n", topClans
+                        .Select((kv, idx) =>
+                        {
+                            string name = groupNames.ContainsKey(kv.Key) ? groupNames[kv.Key] : kv.Key;
+                            return $"{idx + 1}. {name} ({kv.Value} pts)";
+                        })));
                 }
+
+                var endTokens = new Dictionary<string, string>();
+
+                BroadcastLocalized("EndTournament", endTokens);
+
+                if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
+                {
+                    SendDiscordMessage(
+                        Lang("EndTournament", null, endTokens, Configuration.DefaultLanguage)
+                    );
+                }
+
+                Puts($"[Debug] Notifications sent for tournament end:\n{globalMessage}");
+                Puts($"[Debug] Tournament successfully ended. Total participants: {sortedParticipants.Count}");
+
+                foreach (var p in participantsData.Values)
+                    p.Score = 0;
+                SaveParticipantsData();
+                Puts("[Debug] All participant scores reset to 0 and saved at tournament end.");
+
+                countdownTimer?.Destroy();
+                countdownTimer = null;
+                Puts("[Debug] Scheduling the next tournament.");
+                ScheduleTournament();
             }
+            catch (Exception ex)
+            {
+                PrintError($"Failed to end tournament: {ex.Message}");
+            }
+        }
 
         private void OnPlayerInit(BasePlayer player)
         {
@@ -2145,6 +2137,7 @@ namespace Oxide.Plugins
             { "scientistnpcnew",   "Scientist" },
             { "npcmurderer",       "Murderer" },
             { "scarecrow",         "Scarecrow" },
+            { "npc_tunneldweller", "Tunnel Dweller" },
             { "tunneldweller",     "Tunnel Dweller" },
             { "underwaterdweller", "Underwater Dweller" },
             { "bandit_guard",      "Bandit Guard" },
@@ -2580,16 +2573,27 @@ namespace Oxide.Plugins
             tracker.TryGetValue(userId, out int count);
             if (count >= cap)
             {
-                string message = $"[Debug] {(player?.displayName ?? userId.ToString())} reached {label} cap ({cap}).";
-                Puts(message);
+                Puts($"[Debug] {(player?.displayName ?? userId.ToString())} reached {label} cap ({cap}).");
 
                 var lang     = Interface.Oxide.GetLibrary<Lang>();
                 string langCode = player != null 
                     ? lang.GetLanguage(player.UserIDString) 
                     : "en";
 
-                string msg = string.Format(lang.GetMessage("MaxKillsReached", this, langCode), label);
-                player?.ChatMessage(msg);
+                string msg = string.Format(
+                    lang.GetMessage("MaxKillsReached", this, langCode),
+                    label
+                );
+
+                if (player != null)
+                {
+                    player.SendConsoleCommand(
+                        "chat.add",
+                        ulong.Parse(Configuration.ChatIconSteamId),
+                        Configuration.ChatUsername,
+                        msg
+                    );
+                }
 
                 return true;
             }
@@ -2597,7 +2601,7 @@ namespace Oxide.Plugins
             tracker[userId] = count + 1;
             return false;
         }
-        
+
         private void RebuildKillCapsFromHistory()
         {
             npcKillCounts.Clear();
@@ -2946,12 +2950,12 @@ namespace Oxide.Plugins
                     : Configuration.AnimalKillDistance.ToString();
             }
 
-            string globalMessage = Lang(templateKey, playerObj, placeholders);
-
-            SendTournamentMessage(globalMessage);
+            BroadcastLocalized(templateKey, placeholders);
             if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
             {
-                SendDiscordMessage(globalMessage);
+                var def = Configuration.DefaultLanguage;
+                string discordMsg = Lang(templateKey, null, placeholders, def);
+                SendDiscordMessage(discordMsg);
             }
 
             LogEvent($"[Event] {participant.Name} received {points} point{pluralS} for {actionDescription}. New total score: {participant.Score}.");
@@ -3007,14 +3011,18 @@ namespace Oxide.Plugins
                 return;
             }
 
-            var playerList = string.Join("\n", topPlayers.Select((p, i) => $"{i + 1}. {p.Name} ({p.Score} Points)"));
+            var playerList = string.Join("\n", topPlayers
+                .Select((p, i) => $"{i + 1}. {p.Name} ({p.Score} Points)"));
 
-            var message = Lang("TournamentWinners", null, new Dictionary<string, string>
+            var tokens = new Dictionary<string, string>
             {
                 { "PlayerCount", topPlayers.Count.ToString() },
-                { "PlayerList", playerList }
-            });
+                { "PlayerList",  playerList }
+            };
 
+            BroadcastLocalized("TournamentWinners", tokens);
+
+            string message = Lang("TournamentWinners", null, tokens, Configuration.DefaultLanguage);
             SendTournamentMessage(message);
             if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
             {
@@ -3084,6 +3092,15 @@ namespace Oxide.Plugins
             }
 
             return Lang(templateName, actor, extraPlaceholders); // Return the actor's version (if needed for logs)
+        }
+        
+        private void BroadcastLocalized(string templateKey, Dictionary<string,string> tokens)
+        {
+            foreach (var p in BasePlayer.activePlayerList)
+            {
+                var msg = Lang(templateKey, p, tokens);
+                SendFormattedMessage(p, msg);
+            }
         }
 
         private IEnumerable<string> GetPlaceholdersFromTemplate(string template)
@@ -3250,7 +3267,10 @@ namespace Oxide.Plugins
                 SendTournamentMessage(debtMsg);
 
                 if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-                    SendDiscordMessage(Lang("KitPurchaseSuccess", null, tokens, "en"));
+                {
+                    var defaultLang = Configuration.DefaultLanguage;
+                    SendDiscordMessage(Lang("KitPurchaseSuccess", null, tokens, defaultLang));
+                }
 
                 return;
             }
@@ -3258,11 +3278,12 @@ namespace Oxide.Plugins
             SaveParticipantsData();
             tokens["TotalPoints"] = participant.Score.ToString();
 
-            string successMsg = Lang("KitPurchaseSuccess", null, tokens);
-            SendTournamentMessage(successMsg);
-
+            BroadcastLocalized("KitPurchaseSuccess", tokens);
             if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-                SendDiscordMessage(Lang("KitPurchaseSuccess", null, tokens, "en"));
+            {
+                var def = Configuration.DefaultLanguage;
+                SendDiscordMessage(Lang("KitPurchaseSuccess", null, tokens, def));
+            }
 
             LogEvent($"{participant.Name} purchased kit '{kitName}' for {kitPrice} points. New Score: {participant.Score}");
         }
@@ -3347,12 +3368,12 @@ namespace Oxide.Plugins
                     { "PlayerName", player.displayName }
                 };
 
-                string message = Lang("JoinTournament", player, tokens);
-                SendTournamentMessage(message);
-
+                BroadcastLocalized("JoinTournament", tokens);
                 if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
                 {
-                    SendDiscordMessage(Lang("JoinTournament", null, tokens, "en"));
+                    var def = Configuration.DefaultLanguage;
+                    var discordMsg = Lang("JoinTournament", null, tokens, def);
+                    SendDiscordMessage(discordMsg);
                 }
 
                 LogEvent($"{player.displayName} joined the tournament as a new participant.");
@@ -3506,36 +3527,39 @@ namespace Oxide.Plugins
         {
             if (isTournamentRunning)
             {
-                string timeRemainingMessage = GetTimeRemainingMessage();
-
-                var participants = participantsData.Values.OrderByDescending(p => p.Score).ToList();
-
-                string topScorerMessage = participants.Any()
-                    ? $"{participants.First().Name} with {participants.First().Score} points"
+                string timeRemainingMessage = GetTimeRemainingMessage(player);
+                var sorted = participantsData.Values.OrderByDescending(p => p.Score).ToList();
+                string topScorerMessage = sorted.Any()
+                    ? $"{sorted.First().Name} with {sorted.First().Score} points"
                     : Lang("NoTopScorer", player);
+                string totalParticipants = sorted.Count.ToString();
 
-                string totalParticipants = participants.Count.ToString();
-
-                var message = Lang("TournamentStatusActive", player, new Dictionary<string, string>
+                var tokens = new Dictionary<string, string>
                 {
-                    { "TimeRemaining", timeRemainingMessage },
-                    { "TotalParticipants", totalParticipants },
-                    { "TopScorer", topScorerMessage }
-                });
+                    { "TimeRemaining",     timeRemainingMessage },
+                    { "TotalParticipants", totalParticipants    },
+                    { "TopScorer",         topScorerMessage     }
+                };
 
+                BroadcastLocalized("TournamentStatusActive", tokens);
+
+                string message = Lang("TournamentStatusActive", player, tokens);
                 SendPlayerMessage(player, message);
             }
             else
             {
-                string timeRemainingToStart = tournamentStartTime > DateTime.UtcNow
+                string timeUntilStart = tournamentStartTime > DateTime.UtcNow
                     ? FormatTimeRemaining(tournamentStartTime - DateTime.UtcNow)
                     : "N/A";
 
-                var message = Lang("TournamentStatusInactive", player, new Dictionary<string, string>
+                var tokens = new Dictionary<string, string>
                 {
-                    { "TimeUntilStart", timeRemainingToStart }
-                });
+                    { "TimeUntilStart", timeUntilStart }
+                };
 
+                BroadcastLocalized("TournamentStatusInactive", tokens);
+
+                string message = Lang("TournamentStatusInactive", player, tokens);
                 SendPlayerMessage(player, message);
             }
         }
