@@ -84,5 +84,7 @@
   "TournamentAboutToStartDiscord": "Le tournoi va commencer dans {Time}. Ne le manquez pas !",
   "StatsHeader": "Statistiques du tournoi :",
   "RulesHeader": "Règles de pointage du tournoi :",
-  "KitPricesHeader": "Prix des kits :"
+  "KitPricesHeader": "Prix des kits :",
+  "ConfigLanguageChanged": "Langue par défaut modifiée en : {Language}",
+  "ConfigKeySet": "Défini {Key} → {Value}"
 }
