@@ -86,5 +86,7 @@
   "TournamentAboutToStartDiscord": "The tournament is about to start in {Time}. Don't miss it!",
   "StatsHeader": "Tournament Stats:",
   "RulesHeader": "Tournament Scoring Rules:",
-  "KitPricesHeader": "Kit Prices:"
+  "KitPricesHeader": "Kit Prices:",
+  "ConfigLanguageChanged": "Default language changed to: {Language}",
+  "ConfigKeySet": "Set {Key} → {Value}"
 }
