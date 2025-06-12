@@ -86,5 +86,12 @@
   "RulesHeader": "Règles de pointage du tournoi :",
   "KitPricesHeader": "Prix des kits :",
   "ConfigLanguageChanged": "Langue par défaut modifiée en : {Language}",
-  "ConfigKeySet": "Défini {Key} → {Value}"
+  "ConfigKeySet": "Défini {Key} → {Value}",
+  "Npc_Scientist": "Scientifique",
+  "Npc_Murderer": "Meurtrier",
+  "Npc_Scarecrow": "Épouvantail",
+  "Npc_TunnelDweller": "Habitant du tunnel",
+  "Npc_UnderwaterDweller": "Habitant sous-marin",
+  "Npc_BanditGuard": "Garde de bandits",
+  "Npc_Player": "Joueur PNJ"
 }
