@@ -88,5 +88,12 @@
   "RulesHeader": "Tournament Scoring Rules:",
   "KitPricesHeader": "Kit Prices:",
   "ConfigLanguageChanged": "Default language changed to: {Language}",
-  "ConfigKeySet": "Set {Key} → {Value}"
+  "ConfigKeySet": "Set {Key} → {Value}",
+  "Npc_Scientist": "Scientist",
+  "Npc_Murderer": "Murderer",
+  "Npc_Scarecrow": "Scarecrow",
+  "Npc_TunnelDweller": "Tunnel Dweller",
+  "Npc_UnderwaterDweller": "Underwater Dweller",
+  "Npc_BanditGuard": "Bandit Guard",
+  "Npc_Player": "NPC Player"
 }
