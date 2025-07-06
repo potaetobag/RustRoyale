@@ -17,7 +17,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.3.1"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.3.2"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
         private bool initialized = false;
@@ -99,13 +99,13 @@ namespace Oxide.Plugins
             public List<int> NotificationIntervals { get; set; } = new List<int> { 600, 60 }; // Default: every 10 minutes (600 seconds) and last minute (60 seconds)
             public Dictionary<string, int> ScoreRules { get; set; } = new Dictionary<string, int>
             {
-                {"KILL", 5},     // Human player kills another human player
-                {"DEAD", -3},    // Human player is killed by another human player
-                {"JOKE", -1},    // Death by traps, self-inflicted damage
-                {"NPC", 1},      // Kill an NPC (Murderer, Zombie, Scientist, Scarecrow)
-                {"ENT", 20},     // Kill a Helicopter or Bradley Tank
-                {"BRUH", -2},    // Death by an NPC, Helicopter, or Bradley
-                {"WHY", 5}       // Award points for killing an animal (wolf, boar, bear, stag, deer) from over Xm away 
+                {"KILL", 10},     // Human player kills another human player
+                {"DEAD", -5},     // Human player is killed by another human player
+                {"JOKE", -10},    // Death by traps, self-inflicted damage
+                {"NPC", 1},       // Kill an NPC (Murderer, Zombie, Scientist, Scarecrow)
+                {"ENT", 50},      // Kill a Helicopter or Bradley Tank
+                {"BRUH", -10},    // Death by an NPC, Helicopter, or Bradley
+                {"WHY", 10}       // Award points for killing an animal (wolf, boar, bear, stag, deer) from over Xm away 
             };
             public float AnimalKillDistance { get; set; } = 150f;
             public Dictionary<string, int> KitPrices { get; set; } = new Dictionary<string, int>
@@ -114,7 +114,8 @@ namespace Oxide.Plugins
                 {"Bronze", 25},
                 {"Silver", 50},
                 {"Gold", 75},
-                {"Platinum", 100}
+                {"Platinum", 100},
+				{"Mystery Box", 50}
             };
         }
     #endregion
@@ -209,7 +210,7 @@ namespace Oxide.Plugins
                 Configuration.KitPrices = new Dictionary<string, int>
                 {
                     {"Starter", 5}, {"Bronze", 25}, {"Silver", 50},
-                    {"Gold", 75}, {"Platinum", 100}
+                    {"Gold", 75}, {"Platinum", 100}, {"Mystery Box", 50}
                 };
                 updated = true;
             }
@@ -1522,34 +1523,30 @@ namespace Oxide.Plugins
 
             try
             {
-                DayOfWeek startDay = Enum.Parse<DayOfWeek>(Configuration.StartDay, true);
-                DateTime now = DateTime.UtcNow;
-                Puts($"[Debug] The server thinks it's currently {now:yyyy-MM-dd HH:mm:ss} UTC.");
-                DateTime localNow = GetLocalTime(now);
+                var tz = GetTimezone();
+
+                DateTime utcNow   = DateTime.UtcNow;
+                DateTime localNow = TimeZoneInfo.ConvertTimeFromUtc(utcNow, tz);
+                Puts($"[Debug] The server thinks it's currently {utcNow:yyyy-MM-dd HH:mm:ss} UTC.");
                 Puts($"[Debug] localNow is {localNow:yyyy-MM-dd HH:mm:ss} (Timezone={Configuration.Timezone}).");
-                
-                DateTime nextStart = localNow
-                .AddDays((7 + (int)startDay - (int)localNow.DayOfWeek) % 7)
-                .Date
-                .AddHours(Configuration.StartHour)
-                .AddMinutes(Configuration.StartMinute);
 
-            if (nextStart <= localNow)
-            {
-                nextStart = nextStart.AddDays(7);
-            }
+                DayOfWeek startDay = Enum.Parse<DayOfWeek>(Configuration.StartDay, true);
+                DateTime nextLocalStart = localNow.Date
+                    .AddDays((7 + (int)startDay - (int)localNow.DayOfWeek) % 7)
+                    .AddHours(Configuration.StartHour)
+                    .AddMinutes(Configuration.StartMinute);
+                if (nextLocalStart <= localNow)
+                    nextLocalStart = nextLocalStart.AddDays(7);
 
-                tournamentStartTime = GetUtcTime(nextStart);
-                LogEvent($"Tournament scheduled to start on {GetLocalTime(tournamentStartTime):yyyy-MM-dd HH:mm:ss} ({Configuration.Timezone}).");
-                
-                int activeCount = participantsData.Keys.Where(id => !inactiveParticipants.Contains(id)).Count();
-                string startTimeLocal = GetLocalTime(tournamentStartTime).ToString("yyyy-MM-dd HH:mm:ss");
+                tournamentStartTime = TimeZoneInfo.ConvertTimeToUtc(nextLocalStart, tz);
+                LogEvent($"Tournament scheduled to start on {nextLocalStart:yyyy-MM-dd HH:mm:ss} ({Configuration.Timezone}).");
 
+                int activeCount = participantsData.Keys.Count(id => !inactiveParticipants.Contains(id));
                 var tokens = new Dictionary<string, string>
                 {
-                    { "StartTime", startTimeLocal },
-                    { "Timezone", Configuration.Timezone },
-                    { "Duration", Configuration.DurationHours.ToString() },
+                    { "StartTime", nextLocalStart.ToString("yyyy-MM-dd HH:mm:ss") },
+                    { "Timezone",  Configuration.Timezone },
+                    { "Duration",  Configuration.DurationHours.ToString() },
                     { "ActiveCount", activeCount.ToString() }
                 };
 
@@ -1582,15 +1579,17 @@ namespace Oxide.Plugins
 
         private void ScheduleDailyCountdown()
         {
-            DateTime now = DateTime.UtcNow;
-            DateTime nextReminder = now.Date.AddHours(Configuration.StartHour);
+            var tz = GetTimezone();
 
-            if (nextReminder <= now)
-            {
-                nextReminder = nextReminder.AddDays(1);
-            }
+            DateTime utcNow   = DateTime.UtcNow;
+            DateTime localNow = TimeZoneInfo.ConvertTimeFromUtc(utcNow, tz);
 
-            LogEvent($"Daily reminder scheduled for {nextReminder:yyyy-MM-dd HH:mm:ss} UTC.");
+            DateTime nextLocal = localNow.Date.AddHours(Configuration.StartHour);
+            if (nextLocal <= localNow)
+                nextLocal = nextLocal.AddDays(1);
+
+            DateTime nextReminder = TimeZoneInfo.ConvertTimeToUtc(nextLocal, tz);
+            LogEvent($"Daily reminder scheduled for {nextLocal:yyyy-MM-dd HH:mm:ss} ({Configuration.Timezone}) → {nextReminder:yyyy-MM-dd HH:mm:ss} UTC.");
 
             ScheduleCountdown(nextReminder, () =>
             {
@@ -1719,6 +1718,7 @@ namespace Oxide.Plugins
                 Puts($"[RustRoyale] Found latest tournament file {Path.GetFileName(latestFile)} already marked as completed.");
                 
                 isTournamentRunning = false;
+                currentTournamentFile = null;
                 return;
             }
 
@@ -1921,6 +1921,8 @@ namespace Oxide.Plugins
 
                 SaveTournamentHistory(sortedParticipants);
                 LogEvent("Tournament ended successfully.");
+                
+                currentTournamentFile = null;
 
                 string resultsMessage = "Leaderboard:\n";
                 if (sortedParticipants.Any())
@@ -1993,21 +1995,18 @@ namespace Oxide.Plugins
                 var endTokens = new Dictionary<string, string>();
 
                 BroadcastLocalized("EndTournament", endTokens);
+                
+                foreach (var p in participantsData.Values)
+                    p.Score = 0;
+                SaveParticipantsData();
 
                 if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
                 {
-                    SendDiscordMessage(
-                        Lang("EndTournament", null, endTokens, Configuration.DefaultLanguage)
-                    );
+                    SendDiscordMessage(globalMessage.ToString());
                 }
 
                 Puts($"[Debug] Notifications sent for tournament end:\n{globalMessage}");
                 Puts($"[Debug] Tournament successfully ended. Total participants: {sortedParticipants.Count}");
-
-                foreach (var p in participantsData.Values)
-                    p.Score = 0;
-                SaveParticipantsData();
-                Puts("[Debug] All participant scores reset to 0 and saved at tournament end.");
 
                 countdownTimer?.Destroy();
                 countdownTimer = null;
@@ -3885,6 +3884,26 @@ namespace Oxide.Plugins
             SendPlayerMessage(player, Lang("TournamentEndedManually", player));
             Puts($"[Debug] Tournament manually ended by {player.displayName} ({player.UserIDString}).");
         }
+        
+        [ConsoleCommand("end.tournament")]
+        private void CCmdEndTournament(ConsoleSystem.Arg arg)
+        {
+            if (!arg.IsAdmin)
+            {
+                Puts("[RustRoyale] You don’t have permission to end the tournament.");
+                return;
+            }
+
+            if (!isTournamentRunning)
+            {
+                Puts("[RustRoyale] " + Lang("NoTournamentRunning", null));
+                return;
+            }
+
+            EndTournament();
+
+            Puts($"[Debug] Tournament manually ended via console by {(arg.Connection != null ? arg.Connection.userid.ToString() : "Console")}.");
+        }
 
         [ChatCommand("show_rules")]
         private void ShowRulesCommand(BasePlayer player, string command, string[] args)
@@ -3964,6 +3983,7 @@ namespace Oxide.Plugins
 
             SendPlayerMessage(player, helpText.TrimEnd());
         }
+
         #endregion
     }
 }
