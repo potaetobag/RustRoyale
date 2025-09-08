@@ -17,7 +17,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.3.2"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.3.3"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin
     {
         private bool initialized = false;
@@ -115,7 +115,7 @@ namespace Oxide.Plugins
                 {"Silver", 50},
                 {"Gold", 75},
                 {"Platinum", 100},
-				{"Mystery Box", 50}
+                {"Mystery Box", 50}
             };
         }
     #endregion
@@ -458,6 +458,7 @@ namespace Oxide.Plugins
 
         private void SaveWelcomeOptOut()
         {
+            EnsureDataDirectory();
             File.WriteAllText(WelcomeOptOutFile, JsonConvert.SerializeObject(welcomeOptOut, Formatting.Indented));
         }
         
@@ -1133,6 +1134,11 @@ namespace Oxide.Plugins
             ResumeInterruptedTournament();
             if (!isTournamentRunning)
                 ScheduleTournament();
+            
+            foreach (var p in BasePlayer.activePlayerList)
+            {
+                try { OnPlayerInit(p); } catch { /* swallow to avoid init loop breaks */ }
+            }
 
             Puts($"Initialization complete. Tournament duration set to {Configuration.DurationHours} hours.");
         }
@@ -1271,6 +1277,7 @@ namespace Oxide.Plugins
         {
             try
             {
+                EnsureDataDirectory();
                 var files = Directory.GetFiles(DataDirectory, "Tournament_*.data");
                 DateTime cutoffDate = DateTime.UtcNow.AddDays(-Configuration.DataRetentionDays);
 
@@ -1428,9 +1435,9 @@ namespace Oxide.Plugins
 
                 try
                 {
-                    string path = Interface.Oxide.PluginDirectory + Name + ".cs";
+                    string path = Path.Combine(Interface.Oxide.PluginDirectory, Name + ".cs");
                     File.WriteAllText(path, response);
-                    PrintWarning("[RustRoyale] Plugin file updated from GitHub. Reloading...");
+                    Puts("[RustRoyale] Plugin updated successfully, reloading plugin...");
                     timer.Once(2f, () => Server.Command($"oxide.reload {Name}"));
                 }
                 catch (Exception ex)
@@ -2143,12 +2150,21 @@ namespace Oxide.Plugins
                 }
             }
 
-            if (entity.net != null && info?.InitiatorPlayer != null)
+            if (entity.net != null)
             {
-                lastEntityDamageRecords[entity.net.ID.Value] = info.InitiatorPlayer;
+                BasePlayer killer = info?.InitiatorPlayer;
+
+                if (killer == null && info?.Initiator != null)
+                {
+                    var ownerId = info.Initiator.OwnerID;
+                    if (ownerId != 0)
+                        killer = BasePlayer.FindByID(ownerId);
+                }
+
+                if (killer != null)
+                    lastEntityDamageRecords[entity.net.ID.Value] = killer;
             }
         }
-
         
         private static readonly Dictionary<string, string> NpcNameMap = new Dictionary<string, string>
         {
@@ -2163,6 +2179,11 @@ namespace Oxide.Plugins
             { "bandit_guard",      "Bandit Guard" },
             { "npc_bandit_guard",  "Bandit Guard" },
             { "npc_player",        "NPC Player" },
+            { "scientist_full",     "Scientist" },
+            { "scientist_heavy",    "Heavy Scientist" },
+            { "heavy_scientist",    "Heavy Scientist" },
+            { "scientistmarine",    "Scientist" },
+            { "scientist_arena",    "Scientist" }
         };
         
         private string GetFriendlyNpcName(string prefab)
@@ -2322,20 +2343,18 @@ namespace Oxide.Plugins
             if (entity == null || !participants.Contains(victim.userID))
                 return false;
 
-            string prefab = (entity.ShortPrefabName ?? "").ToLowerInvariant();
+            string prefab = (entity.ShortPrefabName ?? string.Empty).ToLowerInvariant();
             bool isHeli  = prefab.Contains("heli");
             bool isBrad  = prefab.Contains("bradley");
 
-            if (!isHeli && !isBrad && entity.OwnerID != 0UL)
+            if (!isHeli && !isBrad)
             {
-                var owner = BaseNetworkable.serverEntities
-                    .Find(new NetworkableId(entity.OwnerID))
-                    as BaseCombatEntity;
-                if (owner != null)
+                var parent = entity.GetParentEntity() as BaseCombatEntity;
+                if (parent != null)
                 {
-                    var ownerPrefab = (owner.ShortPrefabName ?? "").ToLowerInvariant();
-                    isHeli = ownerPrefab.Contains("heli");
-                    isBrad = ownerPrefab.Contains("bradley");
+                    var p = (parent.ShortPrefabName ?? string.Empty).ToLowerInvariant();
+                    isHeli = p.Contains("heli");
+                    isBrad = p.Contains("bradley");
                 }
             }
 
@@ -2593,10 +2612,13 @@ namespace Oxide.Plugins
         {
             if (entity == null || !isTournamentRunning) return false;
 
-            var prefab = (entity.ShortPrefabName ?? "").ToLowerInvariant();
-            if (prefab != "patrolhelicopter"
-             && prefab != "bradley"
-             && prefab != "transportheli")
+            var prefab = (entity.ShortPrefabName ?? string.Empty).ToLowerInvariant();
+
+            bool isBradley = prefab == "bradleyapc";
+            bool isPatrol  = prefab == "patrolhelicopter";
+            bool isCh47    = prefab == "ch47.entity" || prefab == "ch47scientists.entity";
+
+            if (!isBradley && !isPatrol && !isCh47)
                 return false;
 
             BasePlayer killer = info?.InitiatorPlayer;
@@ -2608,8 +2630,8 @@ namespace Oxide.Plugins
             if (IsActionCodeDisabled("ENT"))
                 return false;
 
-            string type = prefab == "bradley" ? "Bradley"
-                        : prefab == "transportheli" ? "Cargo Helicopter"
+            string type = isBradley ? "Bradley"
+                        : isCh47    ? "Cargo Helicopter"
                         : "Patrol Helicopter";
 
             UpdatePlayerScore(killer.userID, "ENT", $"destroying a {type}", null, info, entityName: type);
@@ -2619,6 +2641,7 @@ namespace Oxide.Plugins
                 lastEntityDamageRecords.Remove(entity.net.ID.Value);
 
             return true;
+
         }
         
         private bool HandleLongDistanceAnimalKill(BaseCombatEntity entity, HitInfo info)
@@ -2630,7 +2653,11 @@ namespace Oxide.Plugins
             if (killer == null || !participants.Contains(killer.userID))
                 return false;
 
-            if (info?.Weapon == null || !(info.Weapon is BaseProjectile))
+            bool isProjectile =
+                (info != null && (info.IsProjectile()
+                                  || info.Weapon is BaseProjectile));
+
+            if (!isProjectile)
             {
                 Puts($"[Debug] Ignored long-range animal kill by {killer.displayName} — not a projectile weapon.");
                 return false;
@@ -2695,6 +2722,9 @@ namespace Oxide.Plugins
         {
             npcKillCounts.Clear();
             animalKillCounts.Clear();
+            
+            if (!Directory.Exists(DataDirectory))
+                return;
 
             var filePaths = Directory
                 .GetFiles(DataDirectory, "Tournament_*.data")
@@ -2913,9 +2943,27 @@ namespace Oxide.Plugins
                     }
                 }
 
+                string tmpPath = ParticipantsFile + ".tmp";
+                string bakPath = ParticipantsFile + ".bak";
+
                 lock (participantsDataLock)
                 {
-                    File.WriteAllText(ParticipantsFile, serializedData);
+                    File.WriteAllText(tmpPath, serializedData);
+
+                    try
+                    {
+                        File.Replace(tmpPath, ParticipantsFile, bakPath, /*ignoreMetadataErrors*/ true);
+                    }
+                    catch (PlatformNotSupportedException)
+                    {
+                        File.Copy(tmpPath, ParticipantsFile, true);
+                        File.Delete(tmpPath);
+                    }
+                    catch (IOException)
+                    {
+                        File.Copy(tmpPath, ParticipantsFile, true);
+                        File.Delete(tmpPath);
+                    }
                 }
 
                 string savedData = File.ReadAllText(ParticipantsFile);
@@ -3054,6 +3102,8 @@ namespace Oxide.Plugins
 
         private void SaveTournamentHistory(List<PlayerStats> topPlayers)
         {
+            EnsureDataDirectory();
+
             var completedTournament = new
             {
                 Date = DateTime.UtcNow,
@@ -3066,6 +3116,7 @@ namespace Oxide.Plugins
             {
                 history = JsonConvert.DeserializeObject<List<object>>(File.ReadAllText(HistoryFile)) ?? new List<object>();
             }
+
             history.Add(completedTournament);
             File.WriteAllText(HistoryFile, JsonConvert.SerializeObject(history, Formatting.Indented));
 
@@ -3146,6 +3197,7 @@ namespace Oxide.Plugins
         {
             try
             {
+                EnsureDataDirectory();
                 File.WriteAllText(AutoEnrollBlacklistFile, JsonConvert.SerializeObject(autoEnrollBlacklist, Formatting.Indented));
             }
             catch (Exception ex)
@@ -3214,7 +3266,15 @@ namespace Oxide.Plugins
             try
             {
                 var formattedMessage = Configuration.ChatFormat.Replace("{message}", message);
-                player.SendConsoleCommand("chat.add", ulong.Parse(Configuration.ChatIconSteamId), Configuration.ChatUsername, formattedMessage);
+
+                ulong iconId = 0;
+                if (!ulong.TryParse(Configuration.ChatIconSteamId, out iconId))
+                {
+                    iconId = 0;
+                }
+
+                player.SendConsoleCommand("chat.add", iconId, Configuration.ChatUsername, formattedMessage);
+
             }
             catch (Exception ex)
             {
@@ -3304,6 +3364,7 @@ namespace Oxide.Plugins
     #region Kit Economy Integration
     [PluginReference]
     private Plugin Kits;
+    [PluginReference]
     private Plugin Clans;
 
     private void NormaliseKitPrices()
