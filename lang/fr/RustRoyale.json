@@ -87,6 +87,7 @@
   "KitPricesHeader": "Prix des kits :",
   "ConfigLanguageChanged": "Langue par défaut modifiée en : {Language}",
   "ConfigKeySet": "Défini {Key} → {Value}",
+  
   "Npc_Scientist": "Scientifique",
   "Npc_Murderer": "Meurtrier",
   "Npc_Scarecrow": "Épouvantail",
@@ -94,6 +95,7 @@
   "Npc_UnderwaterDweller": "Habitant sous-marin",
   "Npc_BanditGuard": "Garde de bandits",
   "Npc_Player": "Joueur PNJ",
+  
   "Npc_HeavyScientist": "Scientifique Lourd",
   "Trap_AutoTurret": "Tourelle automatique",
   "Trap_Guntrap": "Piège à fusil",
@@ -103,6 +105,7 @@
   "Trap_Landmine": "Mine terrestre",
   "Trap_Barricade": "Barricade",
   "Trap_SentryGun": "Tourelle Sentinelle",
+  
   "Animal_Wolf": "Loup",
   "Animal_Boar": "Sanglier",
   "Animal_Bear": "Ours",
@@ -113,5 +116,17 @@
   "Animal_Crocodile": "Crocodile",
   "Animal_Panther": "Panthère",
   "Animal_Tiger": "Tigre",
-  "Animal_Snake": "Serpent"
+  "Animal_Snake": "Serpent",
+  
+  "Env_FallDamage": "Dégâts de Chute",
+  "Env_Drowning": "Noyade",
+  "Env_FireDamage": "Dégâts de Feu",
+  "Env_Hypothermia": "Hypothermie",
+  "Env_Heatstroke": "Coup de Chaleur",
+  "Env_RadiationSickness": "Maladie des Radiations",
+  "Env_BleedingOut": "Hémorragie",
+  "Env_HypothermiaExposure": "Hypothermie (Exposition)",
+  "Env_RadiationExposure": "Exposition aux Radiations",
+  "Env_Suicide": "Suicide",
+  "Env_Poisoning": "Empoisonnement"
 }
