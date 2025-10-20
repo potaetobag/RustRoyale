@@ -89,6 +89,7 @@
   "KitPricesHeader": "Kit Prices:",
   "ConfigLanguageChanged": "Default language changed to: {Language}",
   "ConfigKeySet": "Set {Key} → {Value}",
+  
   "Npc_Scientist": "Scientist",
   "Npc_Murderer": "Murderer",
   "Npc_Scarecrow": "Scarecrow",
@@ -97,6 +98,7 @@
   "Npc_BanditGuard": "Bandit Guard",
   "Npc_Player": "NPC Player",
   "Npc_HeavyScientist": "Heavy Scientist",
+  
   "Trap_AutoTurret": "Auto Turret",
   "Trap_Guntrap": "Gun Trap",
   "Trap_FlameTurret": "Flame Turret",
@@ -105,6 +107,7 @@
   "Trap_Landmine": "Landmine",
   "Trap_Barricade": "Barricade",
   "Trap_SentryGun": "Sentry Gun",
+  
   "Animal_Wolf": "Wolf",
   "Animal_Boar": "Boar",
   "Animal_Bear": "Bear",
@@ -115,5 +118,18 @@
   "Animal_Crocodile": "Crocodile",
   "Animal_Panther": "Panther",
   "Animal_Tiger": "Tiger",
-  "Animal_Snake": "Snake"
+  "Animal_Snake": "Snake",
+
+  "Env_FallDamage": "Fall Damage",
+  "Env_Drowning": "Drowning",
+  "Env_FireDamage": "Fire Damage",
+  "Env_Hypothermia": "Hypothermia",
+  "Env_Heatstroke": "Heatstroke",
+  "Env_RadiationSickness": "Radiation Sickness",
+  "Env_BleedingOut": "Bleeding Out",
+  "Env_HypothermiaExposure": "Hypothermia (Exposure)",
+  "Env_RadiationExposure": "Radiation Exposure",
+  "Env_Suicide": "Suicide",
+  "Env_Poisoning": "Poisoning"
+
 }
