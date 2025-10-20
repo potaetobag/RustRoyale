@@ -87,6 +87,7 @@
     "KitPricesHeader": "Precios de los kits:",
     "ConfigLanguageChanged": "Idioma predeterminado cambiado a: {Language}. ¡Ahora sí, asere!",
     "ConfigKeySet": "Configurado {Key} → {Value}. ¡Bárbaro!",
+    
     "Npc_Scientist": "Científico loco",
     "Npc_Murderer": "Matón del monte",
     "Npc_Scarecrow": "Espantapájaros del campo",
@@ -95,6 +96,7 @@
     "Npc_BanditGuard": "Guachimán bandolero",
     "Npc_Player": "Jugador NPC",
     "Npc_HeavyScientist": "Científico Pesado",
+    
     "Trap_AutoTurret": "Torreta automática",
     "Trap_Guntrap": "Trampa con pistolita",
     "Trap_FlameTurret": "Torreta de fuego",
@@ -103,6 +105,7 @@
     "Trap_Landmine": "Mina terrestre",
     "Trap_Barricade": "Barricada",
     "Trap_SentryGun": "Torreta Centinela",
+    
     "Animal_Wolf": "Lobo del monte",
     "Animal_Boar": "Puerco salvaje",
     "Animal_Bear": "Oso bruto",
@@ -113,5 +116,18 @@
     "Animal_Crocodile": "Cocodrilo del pantano",
     "Animal_Panther": "Pantera negra",
     "Animal_Tiger": "Tigre del Caribe",
-    "Animal_Snake": "Culebra sapa"
+    "Animal_Snake": "Culebra sapa",
+
+    "Env_FallDamage": "Por despingamiento",
+    "Env_Drowning": "Como Matojo, por no saber nadar nada",
+    "Env_FireDamage": "Tostadito como pan a la plancha",
+    "Env_Hypothermia": "Te congelaste del frío",
+    "Env_Heatstroke": "Te dio un golpe de calor",
+    "Env_RadiationSickness": "Te frió la radiación",
+    "Env_BleedingOut": "Te desangraste",
+    "Env_HypothermiaExposure": "Te congelaste por estar afuera",
+    "Env_RadiationExposure": "Te cocinó la radiación",
+    "Env_Suicide": "Te quitaste la vida",
+    "Env_Poisoning": "Te envenenaste"
+
 }
