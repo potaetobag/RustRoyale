@@ -89,6 +89,9 @@
   "KitPricesHeader": "Kit Prices:",
   "ConfigLanguageChanged": "Default language changed to: {Language}",
   "ConfigKeySet": "Set {Key} → {Value}",
+  "UnknownEntity": "Unknown",
+  "LeaveTournament": "{PlayerName} has left the tournament.",
+  "Kit_Mystery Box": "Mystery Box",
   
   "Npc_Scientist": "Scientist",
   "Npc_Murderer": "Murderer",
