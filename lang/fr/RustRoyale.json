@@ -80,6 +80,8 @@
   "Toggle_DontShowAgain": "Ne plus afficher",
   "Button_Close": "Fermer",
   "ArticleTemplate": "une {0}",
+  "ArticleTemplateA": "un {0}",
+  "ArticleTemplateAE": "un {0}",
   "MaxKillsReached": "Vous avez atteint le nombre maximal de {0} éliminations autorisées pour ce tournoi.",
   "TournamentAboutToStartDiscord": "Le tournoi va commencer dans {Time}. Ne le manquez pas !",
   "StatsHeader": "Statistiques du tournoi :",
