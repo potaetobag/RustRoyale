@@ -89,7 +89,7 @@
     "ConfigKeySet": "Configurado {Key} → {Value}. ¡Bárbaro!",
     "UnknownEntity": "Ni puta idea",
     "LeaveTournament": "{PlayerName} se piró del torneo.",
-    "Kit_Mystery Box": "Caja Misteriosa"
+    "Kit_Mystery Box": "Caja Misteriosa",
     
     "Npc_Scientist": "Científico loco",
     "Npc_Murderer": "Matón del monte",
@@ -101,7 +101,7 @@
     "Npc_HeavyScientist": "Científico Pesado",
     
     "Trap_AutoTurret": "Torreta automática",
-    "Trap_Guntrap": "Trampa con pistolita",
+    "Trap_GunTrap": "Trampa con pistolita",
     "Trap_FlameTurret": "Torreta de fuego",
     "Trap_BearTrap": "Trampa de oso",
     "Trap_FloorSpike": "Pinchos del suelo",
