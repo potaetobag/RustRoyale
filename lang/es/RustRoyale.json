@@ -87,6 +87,9 @@
     "KitPricesHeader": "Precios de los kits:",
     "ConfigLanguageChanged": "Idioma predeterminado cambiado a: {Language}. ¡Ahora sí, asere!",
     "ConfigKeySet": "Configurado {Key} → {Value}. ¡Bárbaro!",
+    "UnknownEntity": "Ni puta idea",
+    "LeaveTournament": "{PlayerName} se piró del torneo.",
+    "Kit_Mystery Box": "Caja Misteriosa"
     
     "Npc_Scientist": "Científico loco",
     "Npc_Murderer": "Matón del monte",
