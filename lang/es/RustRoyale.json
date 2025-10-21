@@ -80,6 +80,8 @@
     "Toggle_DontShowAgain": "No mostrar más nunca",
     "Button_Close": "Cerrar",
     "ArticleTemplate": "un {0}",
+    "ArticleTemplateA": "un {0}",
+    "ArticleTemplateAE": "un {0}",
     "MaxKillsReached": "Llegaste al tope de {0} muertes, mi hermano. Ya deja algo pa’ los demás.",
     "TournamentAboutToStartDiscord": "¡Mi gente! El torneo arranca en {Time}. ¡Ponte las pilas o te quedas fuera!",
     "StatsHeader": "Estadísticas del relajo:",
