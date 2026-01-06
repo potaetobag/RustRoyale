@@ -17,8 +17,8 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.3.4"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
-    class RustRoyale : RustPlugin
+    [Info("RustRoyale", "Potaetobag", "1.3.5"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    class RustRoyale : RustPlugin 
     {
         private bool initialized = false;
         private const string ConfigUiPanelName = "RustRoyale_Config_UI";
@@ -118,7 +118,7 @@ namespace Oxide.Plugins
                 {"Mystery Box", 75}
             };
         }
-    #endregion
+    #endregion 
     #region Configuration Handling
         protected override void LoadDefaultConfig()
         {
@@ -1384,6 +1384,36 @@ namespace Oxide.Plugins
                 }
             }
         }
+        
+        private string ForceLabelToDefaultLanguage(string label)
+        {
+            if (string.IsNullOrEmpty(label)) return label;
+
+            var def = string.IsNullOrEmpty(Configuration.DefaultLanguage) ? "en" : Configuration.DefaultLanguage;
+
+            if (Translations != null && Translations.TryGetValue(def, out var defDict) && defDict != null)
+            {
+                if (defDict.Values.Contains(label))
+                    return label;
+
+                foreach (var kvLang in Translations)
+                {
+                    var dict = kvLang.Value;
+                    if (dict == null) continue;
+
+                    foreach (var kv in dict)
+                    {
+                        if (string.Equals(kv.Value, label, StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (defDict.TryGetValue(kv.Key, out var defValue) && !string.IsNullOrEmpty(defValue))
+                                return defValue;
+                        }
+                    }
+                }
+            }
+
+            return label;
+        }
 
         private void OnServerInitialized()
         {
@@ -1392,7 +1422,7 @@ namespace Oxide.Plugins
             Puts($"[RustRoyale] Current plugin version: {currentVersion}");
 
             Puts("[RustRoyale] Checking remote plugin for updates...");
-            
+
             lang = Interface.Oxide.GetLibrary<Lang>();
 
             webrequest.Enqueue(PluginUpdateUrl, null, (code, response) =>
@@ -1451,7 +1481,28 @@ namespace Oxide.Plugins
                 OnPlayerInit(player);
             }
 
+            if (isTournamentRunning)
+            {
+                if (DateTime.UtcNow >= tournamentEndTime)
+                {
+                    Puts("[Guard] Init found a past-due tournament; ending now.");
+                    EndTournament();
+                }
+                else
+                {
+                    var remaining = (float)(tournamentEndTime - DateTime.UtcNow).TotalSeconds;
+                    if (remaining > 0f)
+                    {
+                        tournamentDurationTimer?.Destroy();
+                        tournamentDurationTimer = timer.Once(remaining, () =>
+                        {
+                            if (isTournamentRunning) EndTournament();
+                        });
+                    }
+                }
+            }
         }
+
     #endregion
     #region Schedule Tournament
         private readonly Dictionary<ulong, PlayerStats> playerStats = new Dictionary<ulong, PlayerStats>();
@@ -2197,88 +2248,145 @@ namespace Oxide.Plugins
                     lastEntityDamageRecords[entity.net.ID.Value] = killer;
             }
         }
-
-        private static readonly Dictionary<string, string> NpcNameMap = new Dictionary<string, string>
+        
+        private static readonly Dictionary<string, string> AnimalNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            { "scientist",         "Scientist" },
-            { "scientistnpc",      "Scientist" },
-            { "scientistnpcnew",   "Scientist" },
-            { "npcmurderer",       "Murderer" },
-            { "scarecrow",         "Scarecrow" },
-            { "npc_tunneldweller", "Tunnel Dweller" },
-            { "tunneldweller",     "Tunnel Dweller" },
-            { "underwaterdweller", "Underwater Dweller" },
-            { "bandit_guard",      "Bandit Guard" },
-            { "npc_bandit_guard",  "Bandit Guard" },
-            { "npc_player",        "NPC Player" },
-            { "scientist_full",    "Scientist" },
-            { "scientist_heavy",   "Heavy Scientist" },
-            { "heavy_scientist",   "Heavy Scientist" },
-            { "scientistmarine",   "Scientist" },
-            { "scientist_arena",   "Scientist" }
+            { "wolf", "Wolf" },
+            { "boar", "Boar" },
+            { "bear", "Bear" },
+            { "polar_bear", "Polar Bear" },
+            { "polarbear", "Polar Bear" },
+            { "stag", "Deer" },
+            { "deer", "Deer" },
+            { "chicken", "Chicken" },
+            { "horse", "Horse" },
+            { "crocodile", "Crocodile" },
+            { "panther", "Panther" },
+            { "tiger", "Tiger" },
+            { "snake", "Snake" }
         };
 
-        private string GetFriendlyNpcName(string prefab)
+        private static readonly Dictionary<string, string> NpcNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            if (string.IsNullOrEmpty(prefab)) return "Unknown";
-            var lower = prefab.ToLowerInvariant();
+            { "scientist",           "Scientist" },
+            { "scientistnpc",        "Scientist" },
+            { "scientistnpcnew",     "Scientist" },
+            { "scientist_full",      "Scientist" },
+            { "scientist_heavy",     "Heavy Scientist" },
+            { "heavy_scientist",     "Heavy Scientist" },
+            { "scientistmarine",     "Scientist" },
+            { "scientist_arena",     "Scientist" },
+            { "npcmurderer",         "Murderer" },
+            { "scarecrow",           "Scarecrow" },
+            { "npc_tunneldweller",   "Tunnel Dweller" },
+            { "tunneldweller",       "Tunnel Dweller" },
+            { "underwaterdweller",   "Underwater Dweller" },
+            { "bandit_guard",        "Bandit Guard" },
+            { "npc_bandit_guard",    "Bandit Guard" },
+            { "npc_player",          "NPC Player" }
+        };
+
+        private static readonly Dictionary<string, string> TrapNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "autoturret_deployed",        "Auto Turret" },
+            { "guntrap",                    "Gun Trap" },
+            { "flameturret.deployed",       "Flame Turret" },
+            { "beartrap",                   "Bear Trap" },
+            { "wooden_floor_spike_cluster", "Floor Spike" },
+            { "landmine",                   "Landmine" },
+            { "barricade",                  "Barricade" },
+            { "sentry.bandit.static",       "Sentry Gun" }
+        };
+
+        private static readonly Dictionary<string, string> EnvironmentalDeathMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "fall",               "Fall Damage" },
+            { "drowned",            "Drowning" },
+            { "burn",               "Fire Damage" },
+            { "cold",               "Hypothermia" },
+            { "heat",               "Heatstroke" },
+            { "radiation",          "Radiation Sickness" },
+            { "bleeding",           "Bleeding Out" },
+            { "coldexposure",       "Hypothermia (Exposure)" },
+            { "radiationexposure",  "Radiation Exposure" },
+            { "suicide",            "Suicide" },
+            { "poison",             "Poisoning" }
+        };
+
+        private string GetFriendlyNpcName(string prefab, BasePlayer viewer = null)
+        {
+            if (string.IsNullOrEmpty(prefab))
+                return Lang("UnknownEntity", viewer);
+
+            string lower = prefab.ToLowerInvariant();
             foreach (var kvp in NpcNameMap)
             {
                 if (lower == kvp.Key || lower.StartsWith(kvp.Key + ".") || lower.StartsWith(kvp.Key + "_"))
-                    return kvp.Value;
+                {
+                    string npcKey = kvp.Value.Replace(" ", "").Replace("-", "").Replace("_", "");
+                    string langKey = $"Npc_{npcKey}";
+                    string localized = Lang(langKey, viewer);
+                    return !string.IsNullOrEmpty(localized) && localized != langKey ? localized : kvp.Value;
+                }
             }
             return prefab;
         }
 
-        private static readonly Dictionary<string, string> TrapNameMap = new Dictionary<string, string>
+        private string GetFriendlyTrapName(string prefab, BasePlayer viewer = null)
         {
-            { "autoturret_deployed",         "autoturret" },
-            { "guntrap",                     "guntrap" },
-            { "flameturret.deployed",        "flameturret" },
-            { "beartrap",                    "bear trap" },
-            { "wooden_floor_spike_cluster",  "floor spike" },
-            { "landmine",                    "landmine" },
-            { "barricade",                   "barricade" },
-            { "sentry.bandit.static",        "sentry" }
-        };
+            if (string.IsNullOrEmpty(prefab))
+                return Lang("UnknownEntity", viewer);
 
-        private string GetFriendlyTrapName(string prefabName)
-        {
-            if (string.IsNullOrEmpty(prefabName)) return "Unknown";
-            return TrapNameMap.TryGetValue(prefabName.ToLowerInvariant(), out var friendly) ? friendly : prefabName;
+            string lower = prefab.ToLowerInvariant();
+            foreach (var kvp in TrapNameMap)
+            {
+                if (lower == kvp.Key || lower.StartsWith(kvp.Key + ".") || lower.StartsWith(kvp.Key + "_"))
+                {
+                    string trapKey = kvp.Value.Replace(" ", "").Replace("-", "").Replace("_", "");
+                    string langKey = $"Trap_{trapKey}";
+                    var localized = Lang(langKey, viewer);
+                    return !string.IsNullOrEmpty(localized) && localized != langKey ? localized : kvp.Value;
+                }
+            }
+            return prefab;
         }
 
-        private static readonly Dictionary<string, string> AnimalNameMap = new Dictionary<string, string>
+        private string GetFriendlyAnimalName(string prefab, BasePlayer viewer = null)
         {
-            { "wolf",        "Wolf" },
-            { "boar",        "Boar" },
-            { "bear",        "Bear" },
-            { "polar_bear",  "Polar Bear" },
-            { "polarbear",   "Polar Bear" },
-            { "stag",        "Deer" },
-            { "deer",        "Deer" },
-            { "chicken",     "Chicken" },
-            { "horse",       "Horse" },
-            { "crocodile",   "Crocodile" },
-            { "panther",     "Panther" },
-            { "tiger",       "Tiger" },
-            { "snake",       "Snake" }
-        };
+            if (string.IsNullOrEmpty(prefab))
+                return Lang("UnknownEntity", viewer);
 
-        private static readonly Dictionary<string, string> EnvironmentalDeathMap = new Dictionary<string, string>
+            string lower = prefab.ToLowerInvariant();
+            foreach (var kvp in AnimalNameMap)
+            {
+                if (lower == kvp.Key || lower.StartsWith(kvp.Key + ".") || lower.StartsWith(kvp.Key + "_") || lower.StartsWith(kvp.Key + "2"))
+                {
+                    var key = $"Animal_{kvp.Value.Replace(" ", "")}";
+                    var localized = Lang(key, viewer);
+                    return !string.IsNullOrEmpty(localized) && localized != key ? localized : kvp.Value;
+                }
+            }
+            return prefab;
+        }
+
+        private string GetFriendlyEnvironmentalCause(string causeKey, BasePlayer viewer = null)
         {
-            { "fall",       "Fall Damage"          },
-            { "drowned",    "Drowning"             },
-            { "burn",       "Fire Damage"          },
-            { "cold",       "Hypothermia"          },
-            { "heat",       "Heatstroke"           },
-            { "radiation",  "Radiation Sickness"   },
-            { "bleeding",   "Bleeding Out"         },
-            { "coldexposure","Hypothermia (Exposure)" },
-            { "radiationexposure", "Radiation Exposure"   },
-            { "suicide",    "Suicide"              },
-            { "poison",     "Poisoning"            }
-        };
+            if (string.IsNullOrEmpty(causeKey))
+                return Lang("UnknownEntity", viewer);
+
+            string lower = causeKey.ToLowerInvariant();
+            foreach (var kvp in EnvironmentalDeathMap)
+            {
+                if (lower == kvp.Key || lower.StartsWith(kvp.Key))
+                {
+                    string keyName = kvp.Value.Replace(" ", "").Replace("-", "").Replace("(", "").Replace(")", "");
+                    string langKey = $"Env_{keyName}";
+                    string localized = Lang(langKey, viewer);
+                    return !string.IsNullOrEmpty(localized) && localized != langKey ? localized : kvp.Value;
+                }
+            }
+            return Lang("UnknownEntity", viewer);
+        }
 
         private bool IsAnimalKill(string prefabName)
         {
@@ -2292,23 +2400,6 @@ namespace Oxide.Plugins
             if (!match)
                 Puts($"[Debug] Skipped prefab '{lower}' in IsAnimalKill()");
             return match;
-        }
-
-        private string GetFriendlyAnimalName(string prefab)
-        {
-            if (string.IsNullOrEmpty(prefab)) return "Unknown";
-            string lower = prefab.ToLowerInvariant();
-            foreach (var kvp in AnimalNameMap)
-            {
-                if (lower == kvp.Key ||
-                    lower.StartsWith(kvp.Key + ".") ||
-                    lower.StartsWith(kvp.Key + "_") ||
-                    lower.StartsWith(kvp.Key + "2"))
-                {
-                    return kvp.Value;
-                }
-            }
-            return prefab;
         }
 
         private void OnPlayerDeath(BasePlayer victim, HitInfo info)
@@ -2378,7 +2469,15 @@ namespace Oxide.Plugins
             if (IsActionCodeDisabled("BRUH")) 
                 return false;
             string type = isBrad ? "Bradley" : "Helicopter";
-            UpdatePlayerScore(victim.userID, "BRUH", $"defeated by a {type}", victim, info, entityName: type);
+            UpdatePlayerScore(
+                victim.userID,
+                "BRUH",
+                $"defeated by a {type}",
+                victim, info,
+                entityName: type,
+                rawEntityType: "npc",
+                rawEntityPrefab: prefab
+            );
             Puts($"[Debug] {victim.displayName} lost {GetEffectiveScore("BRUH")} point(s) for death to a {type}.");
             return true;
         }
@@ -2391,10 +2490,10 @@ namespace Oxide.Plugins
             if (!isNpcKill && !isUnownedEntity)
                 return false;
             string attackerName = attacker?.ShortPrefabName ?? entity?.ShortPrefabName ?? "Unknown";
-            attackerName = GetFriendlyNpcName(attackerName);
+            attackerName = GetFriendlyNpcName(attackerName, victim);
             if (!participants.Contains(victim.userID) || IsActionCodeDisabled("BRUH"))
                 return false;
-            UpdatePlayerScore(victim.userID, "BRUH", $"being defeated by {attackerName}", victim, info, entityName: attackerName);
+            UpdatePlayerScore(victim.userID, "BRUH", $"being defeated by {attackerName}", victim, info, entityName: attackerName, rawEntityType: "npc", rawEntityPrefab: (attacker != null ? attacker.ShortPrefabName : entity?.ShortPrefabName));
             int finalPoints = GetEffectiveScore("BRUH");
             Puts($"[Debug] {victim.displayName} lost {finalPoints} point(s) for being defeated by {attackerName}.");
             return true;
@@ -2453,16 +2552,19 @@ namespace Oxide.Plugins
             if (!TrapNameMap.ContainsKey(prefab))
                 return false;
             string entityName = entity.ShortPrefabName;
-            string friendlyName = GetFriendlyTrapName(entityName);
+            string friendlyName = GetFriendlyTrapName(entityName, victim);
             ulong ownerId = entity.OwnerID;
-            string ownerName = ownerId != 0 ? GetPlayerName(ownerId) : "Unknown";
+            string ownerName = ownerId != 0 ? GetPlayerName(ownerId) : Lang("UnknownEntity", victim);
+
             if (ownerId == victim.userID)
             {
                 if (!IsActionCodeDisabled("JOKE"))
                 {
                     UpdatePlayerScore(victim.userID, "JOKE",
                       $"self-inflicted death with {friendlyName}", victim, info,
-                      entityName: friendlyName);
+                      entityName: friendlyName,
+                      rawEntityType: "trap",
+                      rawEntityPrefab: entity.ShortPrefabName);
                     Puts($"[Debug] {victim.displayName} lost {GetEffectiveScore("JOKE")} to their own {friendlyName}.");
                     return true;
                 }
@@ -2472,12 +2574,12 @@ namespace Oxide.Plugins
                 bool scored = false;
                 if (!IsActionCodeDisabled("DEAD"))
                 {
-                    UpdatePlayerScore(victim.userID, "DEAD", $"being killed by {friendlyName} owned by {ownerName}", victim, info, attackerName: ownerName, entityName: friendlyName);
+                    UpdatePlayerScore(victim.userID, "DEAD", $"being killed by {friendlyName} owned by {ownerName}", victim, info, attackerName: ownerName, entityName: friendlyName, rawEntityType: "trap", rawEntityPrefab: entity.ShortPrefabName);
                     scored = true;
                 }
                 if (!IsActionCodeDisabled("KILL"))
                 {
-                    UpdatePlayerScore(ownerId, "KILL", $"eliminating {victim.displayName} with {friendlyName}", victim, info, attackerName: ownerName, entityName: friendlyName, reverseMessage: true);
+                    UpdatePlayerScore(ownerId, "KILL", $"eliminating {victim.displayName} with {friendlyName}", victim, info, attackerName: ownerName, entityName: friendlyName, reverseMessage: true, rawEntityType: "trap", rawEntityPrefab: entity.ShortPrefabName);
                     scored = true;
                 }
                 if (scored)
@@ -2490,7 +2592,13 @@ namespace Oxide.Plugins
             }
             if (!IsActionCodeDisabled("JOKE"))
             {
-                UpdatePlayerScore(victim.userID, "JOKE", $"death caused by an unowned {friendlyName}", victim, info, entityName: friendlyName);
+                UpdatePlayerScore(victim.userID, "JOKE",
+                  $"death caused by an unowned {friendlyName}",
+                  victim, info,
+                  entityName: friendlyName,
+                  rawEntityType: "trap",
+                  rawEntityPrefab: entity.ShortPrefabName);
+
                 int points = GetEffectiveScore("JOKE");
                 Puts($"[Debug] {victim.displayName} lost {points} point(s) to an unowned {friendlyName}.");
                 return true;
@@ -2504,10 +2612,18 @@ namespace Oxide.Plugins
                 return false;
             if (IsActionCodeDisabled("NPC"))
                 return false;
-            string npcName = GetFriendlyNpcName(victim.ShortPrefabName);
+            string npcName = GetFriendlyNpcName(victim.ShortPrefabName, attacker);
             if (HasReachedKillCap(npcKillCounts, attacker.userID, Configuration.NpcKillCap, "NPC", attacker))
                 return false;
-            UpdatePlayerScore(attacker.userID, "NPC", $"eliminating an NPC ({npcName})", victim, info, entityName: npcName);
+            UpdatePlayerScore(
+                attacker.userID,
+                "NPC",
+                $"eliminating an NPC ({npcName})",
+                victim, info,
+                entityName: npcName,
+                rawEntityType: "npc",
+                rawEntityPrefab: victim.ShortPrefabName
+            );
             int finalPoints = GetEffectiveScore("NPC");
             Puts($"[Debug] {attacker.displayName} earned {finalPoints} pt(s) for killing NPC {npcName}");
             return true;
@@ -2524,10 +2640,12 @@ namespace Oxide.Plugins
                 return false;
             if (HasReachedKillCap(npcKillCounts, ownerId, Configuration.NpcKillCap, "NPC", BasePlayer.FindByID(ownerId)))
                 return false;
-            string trapName = GetFriendlyTrapName(entity.ShortPrefabName ?? "Unknown");
-            string npcName = GetFriendlyNpcName(victim.ShortPrefabName ?? "Unknown");
+            var owner = BasePlayer.FindByID(ownerId);
+            string trapName = GetFriendlyTrapName(entity.ShortPrefabName ?? "Unknown", owner);
+            string npcName = GetFriendlyNpcName(victim.ShortPrefabName ?? "Unknown", owner);
             string ownerName = GetPlayerName(ownerId);
-            UpdatePlayerScore(ownerId, "NPC", $"eliminating an NPC ({npcName}) with {trapName}", victim, info, attackerName: ownerName, entityName: npcName);
+
+            UpdatePlayerScore(ownerId, "NPC", $"eliminating an NPC ({npcName}) with {trapName}", victim, info, attackerName: ownerName, entityName: npcName, rawEntityType: "npc", rawEntityPrefab: victim.ShortPrefabName);
             int finalPoints = GetEffectiveScore("NPC");
             Puts($"[Debug] {ownerName} earned {finalPoints} pt(s) for killing NPC {npcName} with {trapName}");
             return true;
@@ -2548,9 +2666,7 @@ namespace Oxide.Plugins
             }
             if (noAttacker && (isEnv || isSuicide))
             {
-                string friendlyCause = isSuicide
-                    ? "Suicide"
-                    : (EnvironmentalDeathMap.TryGetValue(causeKey, out var fc) ? fc : (string.IsNullOrEmpty(causeKey) ? "Unknown cause" : causeKey));
+                string friendlyCause = isSuicide ? Lang("Env_Suicide", victim) : GetFriendlyEnvironmentalCause(causeKey, victim);
                 UpdatePlayerScore(
                     victim.userID,
                     "JOKE",
@@ -2559,6 +2675,7 @@ namespace Oxide.Plugins
                     info,
                     entityName: friendlyCause
                 );
+
                 Puts($"[Debug] {victim.displayName} died from {friendlyCause}. Lost {GetEffectiveScore("JOKE")} point(s).");
                 return true;
             }
@@ -2588,7 +2705,7 @@ namespace Oxide.Plugins
             }
             return false;
         }
-	#endregion
+    #endregion
 
     #region OnEntityDeath
         private void OnEntityDeath(BaseCombatEntity entity, HitInfo info)
@@ -2605,7 +2722,6 @@ namespace Oxide.Plugins
             Puts($"[Debug] ❌ No OnEntityDeath handler matched for entity: {entity.ShortPrefabName}");
         }
 
-        
         private bool HandleDeathByBradleyOrHelicopter(BaseCombatEntity entity, HitInfo info)
         {
             if (entity == null || !isTournamentRunning) return false;
@@ -2632,7 +2748,16 @@ namespace Oxide.Plugins
                         : isCh47    ? "Cargo Helicopter"
                         : "Patrol Helicopter";
 
-            UpdatePlayerScore(killer.userID, "ENT", $"destroying a {type}", null, info, entityName: type);
+            UpdatePlayerScore(
+                killer.userID,
+                "ENT",
+                $"destroying a {type}",
+                null, info,
+                entityName: type,
+                rawEntityType: "npc",
+                rawEntityPrefab: prefab
+            );
+
             Puts($"[Debug] {killer.displayName} earned {GetEffectiveScore("ENT")} point(s) for downing a {type}.");
 
             if (entity.net != null)
@@ -2671,9 +2796,9 @@ namespace Oxide.Plugins
             if (HasReachedKillCap(animalKillCounts, killer.userID, Configuration.AnimalKillCap, "animal", killer))
                 return false;
 
-            string animalName = GetFriendlyAnimalName(entity.ShortPrefabName);
+            string animalName = GetFriendlyAnimalName(entity.ShortPrefabName, killer);
 
-            UpdatePlayerScore(killer.userID, "WHY", $"killing an animal ({animalName}) from {distance:F1} meters away", null, info, entityName: animalName, distance: distance);
+            UpdatePlayerScore(killer.userID, "WHY", $"killing an animal ({animalName}) from {distance:F1} meters away", null, info, entityName: animalName, distance: distance, rawEntityType: "animal", rawEntityPrefab: entity.ShortPrefabName);
 
             int finalPoints = GetEffectiveScore("WHY");
             Puts($"[Debug] Awarded {finalPoints} pt(s) to {killer.displayName} for {animalName} kill at {distance:F1} m");
@@ -2697,14 +2822,8 @@ namespace Oxide.Plugins
             {
                 Puts($"[Debug] {(player?.displayName ?? userId.ToString())} reached {label} cap ({cap}).");
 
-                var lang     = Interface.Oxide.GetLibrary<Lang>();
-                string langCode = player != null 
-                    ? lang.GetLanguage(player.UserIDString) 
-                    : "en";
-                string rawMsg = string.Format(
-                    lang.GetMessage("MaxKillsReached", this, langCode),
-                    label
-                );
+                string template = Lang("MaxKillsReached", player);
+                string rawMsg   = string.Format(template, label);
 
                 if (player != null)
                     SendPlayerMessage(player, rawMsg);
@@ -2994,7 +3113,7 @@ namespace Oxide.Plugins
             }
         }
 
-        private void UpdatePlayerScore(ulong userId, string actionCode, string actionDescription, BasePlayer victim = null, HitInfo info = null, string attackerName = null, string entityName = "Unknown", bool reverseMessage = false, float? distance = null)
+        private void UpdatePlayerScore(ulong userId, string actionCode, string actionDescription, BasePlayer victim = null, HitInfo info = null, string attackerName = null, string entityName = "Unknown", bool reverseMessage = false, float? distance = null, string rawEntityType = null, string rawEntityPrefab = null)
         {
             Puts($"[Debug] UpdatePlayerScore called for UserID={userId}, ActionCode={actionCode}, Victim={victim?.displayName ?? "None"}, Entity={entityName}");
 
@@ -3080,16 +3199,55 @@ namespace Oxide.Plugins
 
             if (actionCode == "WHY")
             {
-                placeholders["Distance"] = distance.HasValue
-                    ? distance.Value.ToString("F1")
-                    : Configuration.AnimalKillDistance.ToString();
+                placeholders["Distance"] = distance.HasValue ? distance.Value.ToString("F1") : Configuration.AnimalKillDistance.ToString();
             }
 
-            BroadcastLocalized(templateKey, placeholders);
+            if (!string.IsNullOrEmpty(rawEntityType) || !string.IsNullOrEmpty(rawEntityPrefab))
+            {
+                BroadcastLocalized(templateKey, placeholders, (viewer, toks) =>
+                {
+                    var per = new Dictionary<string,string>(toks);
+                    var viewerLang = lang.GetLanguage(viewer.UserIDString);
+                    string localizedEntityName = per.TryGetValue("EntityName", out var current) ? current : "Unknown";
+                    switch (rawEntityType)
+                    {
+                        case "animal": localizedEntityName = GetFriendlyAnimalName(rawEntityPrefab, viewer); break;
+                        case "npc":    localizedEntityName = GetFriendlyNpcName(rawEntityPrefab, viewer);    break;
+                        case "trap":   localizedEntityName = GetFriendlyTrapName(rawEntityPrefab, viewer);   break;
+                        case "player": localizedEntityName = victim != null ? victim.displayName : localizedEntityName; break;
+                        default:
+                            if (!string.IsNullOrEmpty(rawEntityPrefab))
+                                localizedEntityName = GetFriendlyNpcName(rawEntityPrefab, viewer);
+                            break;
+                    }
+                    per["EntityName"] = localizedEntityName;
+                    per["ArticleEntityName"] = WithIndefiniteArticle(localizedEntityName, viewerLang);
+                    per["AttackerType"] = WithIndefiniteArticle(localizedEntityName, viewerLang);
+                    if (per.TryGetValue("Action", out var act) && toks.TryGetValue("EntityName", out var oldName) && !string.IsNullOrEmpty(act) && !string.IsNullOrEmpty(oldName))
+                        per["Action"] = act.Replace(oldName, localizedEntityName);
+                    return per;
+                });
+            }
+            else
+            {
+                BroadcastLocalized(templateKey, placeholders);
+            }
+
             if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
             {
-                var def = Configuration.DefaultLanguage;
-                string discordMsg = Lang(templateKey, null, placeholders, def);
+                var def = string.IsNullOrEmpty(Configuration.DefaultLanguage) ? "en" : Configuration.DefaultLanguage;
+
+                var discordTokens = new Dictionary<string, string>(placeholders);
+
+                if (discordTokens.TryGetValue("EntityName", out var label) && !string.IsNullOrEmpty(label))
+                {
+                    var defLabel = ForceLabelToDefaultLanguage(label);
+                    discordTokens["EntityName"] = defLabel;
+
+                    discordTokens["ArticleEntityName"] = WithIndefiniteArticle(defLabel, def);
+                }
+
+                string discordMsg = Lang(templateKey, null, discordTokens, def);
                 SendDiscordMessage(discordMsg);
             }
 
@@ -3236,11 +3394,15 @@ namespace Oxide.Plugins
             return Lang(templateName, actor, basePlaceholders);
         }
         
-        private void BroadcastLocalized(string templateKey, Dictionary<string,string> tokens)
+        private void BroadcastLocalized(
+            string templateKey,
+            Dictionary<string,string> tokens,
+            Func<BasePlayer, Dictionary<string,string>, Dictionary<string,string>> perPlayer = null)
         {
             foreach (var p in BasePlayer.activePlayerList)
             {
-                var msg = Lang(templateKey, p, tokens);
+                var per = perPlayer != null ? perPlayer(p, tokens) : tokens;
+                var msg = Lang(templateKey, p, per);
                 SendFormattedMessage(p, msg);
             }
         }
@@ -3683,13 +3845,21 @@ namespace Oxide.Plugins
         [ChatCommand("status_tournament")]
         private void StatusTournamentCommand(BasePlayer player, string command, string[] args)
         {
+            if (isTournamentRunning && DateTime.UtcNow >= tournamentEndTime)
+            {
+                Puts("[Guard] Status check found a past-due tournament; ending now.");
+                EndTournament();
+            }
+
             if (isTournamentRunning)
             {
                 string timeRemainingMessage = GetTimeRemainingMessage(player);
                 var sorted = participantsData.Values.OrderByDescending(p => p.Score).ToList();
+
                 string topScorerMessage = sorted.Any()
                     ? $"{sorted.First().Name} with {sorted.First().Score} points"
                     : Lang("NoTopScorer", player);
+
                 string totalParticipants = sorted.Count.ToString();
 
                 var tokens = new Dictionary<string, string>
@@ -3700,7 +3870,6 @@ namespace Oxide.Plugins
                 };
 
                 BroadcastLocalized("TournamentStatusActive", tokens);
-
                 string message = Lang("TournamentStatusActive", player, tokens);
                 SendPlayerMessage(player, message);
             }
@@ -3716,7 +3885,6 @@ namespace Oxide.Plugins
                 };
 
                 BroadcastLocalized("TournamentStatusInactive", tokens);
-
                 string message = Lang("TournamentStatusInactive", player, tokens);
                 SendPlayerMessage(player, message);
             }
@@ -3926,7 +4094,7 @@ namespace Oxide.Plugins
                 }
             }
         }
-        
+
         [ChatCommand("end_tournament")]
         private void EndTournamentCommand(BasePlayer player, string command, string[] args)
         {
@@ -4048,4 +4216,4 @@ namespace Oxide.Plugins
 
         #endregion
     }
-}
+} 
