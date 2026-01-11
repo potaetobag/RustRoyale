@@ -17,7 +17,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("RustRoyale", "Potaetobag", "1.3.5"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
+    [Info("RustRoyale", "Potaetobag", "1.3.6"), Description("Rust Royale custom tournament game mode with point-based scoring system.")]
     class RustRoyale : RustPlugin 
     {
         private bool initialized = false;
@@ -75,6 +75,7 @@ namespace Oxide.Plugins
         private class ConfigData
         {
             public string DefaultLanguage = "en";
+            public bool EnableDebugLogs = false;
             public string DiscordWebhookUrl { get; set; } = "";
             public string ChatFormat { get; set; } = "[<color=#d97559>RustRoyale</color>] {message}";
             public string ChatIconSteamId { get; set; } = "76561199815164411";
@@ -99,23 +100,23 @@ namespace Oxide.Plugins
             public List<int> NotificationIntervals { get; set; } = new List<int> { 600, 60 }; // Default: every 10 minutes (600 seconds) and last minute (60 seconds)
             public Dictionary<string, int> ScoreRules { get; set; } = new Dictionary<string, int>
             {
-                {"KILL", 10},     // Human player kills another human player
-                {"DEAD", -15},     // Human player is killed by another human player
+                {"KILL", 15},     // Human player kills another human player
+                {"DEAD", -12},     // Human player is killed by another human player
                 {"JOKE", -10},    // Death by traps, self-inflicted damage
-                {"NPC", 1},       // Kill an NPC (Murderer, Zombie, Scientist, Scarecrow)
-                {"ENT", 50},      // Kill a Helicopter or Bradley Tank
+                {"NPC", 2},       // Kill an NPC (Murderer, Zombie, Scientist, Scarecrow)
+                {"ENT", 30},      // Kill a Helicopter or Bradley Tank
                 {"BRUH", -10},    // Death by an NPC, Helicopter, or Bradley
-                {"WHY", 10}       // Award points for killing an animal (wolf, boar, bear, stag, deer) from over Xm away 
+                {"WHY", 3}       // Award points for killing an animal (wolf, boar, bear, stag, deer) from over Xm away 
             };
             public float AnimalKillDistance { get; set; } = 150f;
             public Dictionary<string, int> KitPrices { get; set; } = new Dictionary<string, int>
             {
                 {"Starter", 5},
-                {"Bronze", 25},
-                {"Silver", 50},
-                {"Gold", 75},
-                {"Platinum", 100},
-                {"Mystery Box", 75}
+                {"Bronze", 20},
+                {"Silver", 45},
+                {"Gold", 70},
+                {"Platinum", 110},
+                {"Mystery Box", 65}
             };
         }
     #endregion 
@@ -141,6 +142,16 @@ namespace Oxide.Plugins
                 PrintWarning("Configuration file is corrupted or missing. Creating a new one.");
                 LoadDefaultConfig();
             }
+        }
+        
+        private void LogInfo(string message) => Puts($"[RustRoyale] {message}");
+        private void LogWarn(string message) => PrintWarning($"[RustRoyale] {message}");
+        private void LogErr(string message)  => PrintError($"[RustRoyale] {message}");
+
+        private void DebugLog(string message)
+        {
+            if (Configuration?.EnableDebugLogs != true) return;
+            Puts($"[RustRoyale] [Debug] {message}");
         }
 
         private void ValidateConfiguration()
@@ -173,7 +184,7 @@ namespace Oxide.Plugins
             SetDefault(() => Configuration.NpcKillCap, v => Configuration.NpcKillCap = v, 0, "NpcKillCap", v => v < 0);
             SetDefault(() => Configuration.AnimalKillCap, v => Configuration.AnimalKillCap = v, 0, "AnimalKillCap", v => v < 0);
             SetDefault(() => Configuration.TopClansToTrack, v => Configuration.TopClansToTrack = v, 3, "TopClansToTrack", v => v <= 0);
-            SetDefault(() => Configuration.JoinCutoffHours, v => Configuration.JoinCutoffHours = 6, 6, "JoinCutoffHours", v => v < 0 || v > Configuration.DurationHours);
+            SetDefault(() => Configuration.JoinCutoffHours, v => Configuration.JoinCutoffHours = v, 6, "JoinCutoffHours", v => v < 0 || v > Configuration.DurationHours);
 
             if (Configuration.DurationHours < 0.0167 || Configuration.DurationHours > 872)
             {
@@ -183,7 +194,7 @@ namespace Oxide.Plugins
             }
             else if (Configuration.DurationHours < 1)
             {
-                Puts($"[Debug] Short tournament duration detected: {Configuration.DurationHours} hours. This is valid.");
+                DebugLog($"Short tournament duration detected: {Configuration.DurationHours} hours. This is valid.");
             }
 
             if (Configuration.ScoreRules == null || Configuration.ScoreRules.Count == 0)
@@ -266,18 +277,24 @@ namespace Oxide.Plugins
         }
 
         private void CleanupTimers()
-        {
-            if (countdownTimer != null)
-            {
-                countdownTimer.Destroy();
-                countdownTimer = null;
-            }
-            if (tournamentDurationTimer != null)
-            {
-                tournamentDurationTimer.Destroy();
-                tournamentDurationTimer = null;
-            }
-        }
+		{
+			if (countdownTimer != null)
+			{
+				countdownTimer.Destroy();
+				countdownTimer = null;
+			}
+			if (tournamentDurationTimer != null)
+			{
+				tournamentDurationTimer.Destroy();
+				tournamentDurationTimer = null;
+			}
+			if (tournamentHeartbeatTimer != null)
+			{
+				tournamentHeartbeatTimer.Destroy();
+				tournamentHeartbeatTimer = null;
+			}
+		}
+
     #endregion
     #region Language
         private Dictionary<ulong, string> playerLanguages = new();
@@ -1097,18 +1114,19 @@ namespace Oxide.Plugins
         private const string AdminPermission = "rustroyale.admin";
 
         private void Init()
-        {
-            permission.RegisterPermission(AdminPermission, this);
-            LoadPlayerLanguages();
+		{
+			permission.RegisterPermission(AdminPermission, this);
+			lang = Interface.Oxide.GetLibrary<Lang>();
+			LoadPlayerLanguages();
 
-            EnsureLatestLangFile("en");
-            EnsureLatestLangFile("es");
-            EnsureLatestLangFile("fr");
-            
-            GetServerIPAndStartTimer();
+			EnsureLatestLangFile("en");
+			EnsureLatestLangFile("es");
+			EnsureLatestLangFile("fr");
+			
+			GetServerIPAndStartTimer();
 
-            initialized = false;
-        }
+			initialized = false;
+		}
 
         private void ContinueInitialization()
         {
@@ -1159,7 +1177,7 @@ namespace Oxide.Plugins
     #region API
         void GetServerIPAndStartTimer()
         {
-            string ipApiUrl = "http://ip-api.com/json";
+            string ipApiUrl = "https://ip-api.com/json";
 
             Puts("[RustRoyale] 🌐 Getting public IP...");
 
@@ -1240,7 +1258,7 @@ namespace Oxide.Plugins
             if (!Directory.Exists(DataDirectory))
             {
                 Directory.CreateDirectory(DataDirectory);
-                LogMessage($"Created data directory: {DataDirectory}");
+                LogMessage($"Created data directory: {DataDirectory}", isDebug: true);
             }
         }
 
@@ -1371,7 +1389,7 @@ namespace Oxide.Plugins
                     if (entries != null && entries.Count > 0)
                     {
                         Translations[lang] = entries;
-                        Puts($"[LangLoader] Loaded {entries.Count} translations for '{lang}'");
+                        DebugLog($"Loaded {entries.Count} translations for '{lang}'");
                     }
                     else
                     {
@@ -1380,7 +1398,7 @@ namespace Oxide.Plugins
                 }
                 catch (Exception ex)
                 {
-                    Puts($"[LangLoader] Error loading translations for '{lang}': {ex.Message}");
+                    PrintWarning($"[RustRoyale] Translation load error for '{lang}': {ex.Message}");
                 }
             }
         }
@@ -1546,12 +1564,12 @@ namespace Oxide.Plugins
 
             if (timeUntilTarget.TotalSeconds <= 1.0)
             {
-                Puts($"[Debug] Timer expired immediately for target: {targetTime}. Invoking completion.");
+                DebugLog($"Timer expired immediately for target: {targetTime}. Invoking completion.");
                 onCompletion?.Invoke();
                 return;
             }
 
-            Puts($"[Debug] Starting open-ended countdown timer for about {timeUntilTarget.TotalSeconds:F1} seconds.");
+            DebugLog($"Starting countdown timer (~{timeUntilTarget.TotalSeconds:F1}s)");
             countdownTimer?.Destroy();
 
             countdownTimer = timer.Every(1f, () =>
@@ -1562,7 +1580,7 @@ namespace Oxide.Plugins
 
                 if (remainingTime.TotalSeconds <= 1.0)
                 {
-                    Puts("[Debug] Countdown timer expired; invoking completion.");
+                    DebugLog("Countdown expired; invoking completion");
                     countdownTimer?.Destroy();
                     countdownTimer = null;
 
@@ -1585,8 +1603,8 @@ namespace Oxide.Plugins
 
                 DateTime utcNow   = DateTime.UtcNow;
                 DateTime localNow = TimeZoneInfo.ConvertTimeFromUtc(utcNow, tz);
-                Puts($"[Debug] The server thinks it's currently {utcNow:yyyy-MM-dd HH:mm:ss} UTC.");
-                Puts($"[Debug] localNow is {localNow:yyyy-MM-dd HH:mm:ss} (Timezone={Configuration.Timezone}).");
+                DebugLog($"The server thinks it's currently {utcNow:yyyy-MM-dd HH:mm:ss} UTC.");
+                DebugLog($"localNow is {localNow:yyyy-MM-dd HH:mm:ss} (Timezone={Configuration.Timezone}).");
 
                 DayOfWeek startDay = Enum.Parse<DayOfWeek>(Configuration.StartDay, true);
                 DateTime nextLocalStart = localNow.Date
@@ -1618,14 +1636,14 @@ namespace Oxide.Plugins
 
                 ScheduleCountdown(tournamentStartTime, () =>
                 {
-                    Puts("[Debug] Timer expired, attempting to start the tournament.");
+                    DebugLog("Timer expired, attempting to start the tournament.");
                     if (!isTournamentRunning)
                     {
                         StartTournament();
                     }
                     else
                     {
-                        Puts("[Debug] Tournament is already running. Skipping StartTournament.");
+                        DebugLog("Tournament is already running. Skipping StartTournament.");
                     }
                 });
             }
@@ -1672,13 +1690,13 @@ namespace Oxide.Plugins
                     { "Time", formattedTime }
                 };
 
-                Puts($"[Debug] Sending tournament countdown message: {formattedTime}");
+                DebugLog($"Sending tournament countdown message: {formattedTime}");
 
                 string globalMessage = Lang("TournamentCountdown", null, tokens);
 
                 BroadcastLocalized("TournamentCountdown", tokens);
 
-                Puts($"[Debug] Tournament countdown message sent to global chat: {globalMessage}");
+                DebugLog($"Tournament countdown message sent to global chat: {globalMessage}");
 
                 if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
                 {
@@ -1705,38 +1723,40 @@ namespace Oxide.Plugins
                 var defaultLang = Configuration.DefaultLanguage;
                 string discordMessage = Lang("TournamentAboutToStartDiscord", null, tokens, defaultLang);
                 SendDiscordMessage(discordMessage);
-                Puts($"[Debug] Sending imminent start notification to Discord: {discordMessage}");
+                DebugLog($"Sending imminent start notification to Discord: {discordMessage}");
             }
         }
 
         private Timer tournamentDurationTimer;
+		private Timer tournamentHeartbeatTimer;
 
-        private void ScheduleTournamentEnd()
-        {
-            TimeSpan tournamentDuration = TimeSpan.FromHours(Configuration.DurationHours);
-            Puts($"[Debug] Scheduling tournament end in {tournamentDuration.TotalSeconds} seconds.");
+		private void ScheduleTournamentEnd()
+		{
+			TimeSpan tournamentDuration = TimeSpan.FromHours(Configuration.DurationHours);
+			DebugLog($"Scheduling tournament end in {tournamentDuration.TotalSeconds} seconds");
 
-            tournamentDurationTimer?.Destroy();
+			tournamentDurationTimer?.Destroy();
+			tournamentHeartbeatTimer?.Destroy();
 
-            tournamentDurationTimer = timer.Once((float)tournamentDuration.TotalSeconds, () =>
-            {
-                Puts("[Debug] Tournament duration timer expired. Ending tournament...");
-                EndTournament();
-            });
+			tournamentDurationTimer = timer.Once((float)tournamentDuration.TotalSeconds, () =>
+			{
+				DebugLog("Tournament duration timer expired. Ending tournament");
+				EndTournament();
+			});
 
-            timer.Every(60f, () =>
-            {
-                if (!isTournamentRunning || tournamentDurationTimer == null)
-                {
-                    Puts("[Debug] Tournament is not running or duration timer has been destroyed. Stopping debug timer.");
-                    return;
-                }
+			tournamentHeartbeatTimer = timer.Every(60f, () =>
+			{
+				if (!isTournamentRunning || tournamentDurationTimer == null)
+				{
+					return;
+				}
 
-                TimeSpan remainingTime = tournamentEndTime - DateTime.UtcNow;
-                
-                // Puts($"[Debug] Tournament countdown: {FormatTimeRemaining(remainingTime)} remaining.");
-            });
-        }
+				TimeSpan remainingTime = tournamentEndTime - DateTime.UtcNow;
+				
+				DebugLog($"Tournament countdown: {FormatTimeRemaining(remainingTime)} remaining.");
+			});
+		}
+
     #endregion
     #region Tournament Logic
         private int GetEffectiveScore(string actionCode)
@@ -1824,7 +1844,7 @@ namespace Oxide.Plugins
         [ChatCommand("start_tournament")]
         private void StartTournamentCommand(BasePlayer player, string command, string[] args)
         {
-            Puts($"[Debug] Player {player.displayName} ({player.UserIDString}) issued the /start_tournament command.");
+            DebugLog($"Player {player.displayName} ({player.UserIDString}) issued the /start_tournament command.");
 
             if (!ValidateAdminCommand(player, "start the tournament"))
             {
@@ -1834,9 +1854,9 @@ namespace Oxide.Plugins
 
             if (isTournamentRunning)
             {
-                Puts("[Debug] Attempt to start tournament while one is already running.");
+                DebugLog("Attempt to start tournament while one is already running.");
 
-                Puts($"[Debug] Time remaining in the current tournament: {FormatTimeRemaining(tournamentEndTime - DateTime.UtcNow)}");
+                DebugLog($"Time remaining in the current tournament: {FormatTimeRemaining(tournamentEndTime - DateTime.UtcNow)}");
 
                 string message = Lang("TournamentAlreadyRunning", null, new Dictionary<string, string>
                 {
@@ -1846,88 +1866,89 @@ namespace Oxide.Plugins
                 return;
             }
 
-            Puts($"[Debug] Tournament is not running. Proceeding to start the tournament as requested by {player.displayName} ({player.UserIDString}).");
+            DebugLog($"Tournament is not running. Proceeding to start the tournament as requested by {player.displayName} ({player.UserIDString}).");
 
             StartTournament();
 
-            Puts($"[Debug] Tournament started successfully by {player.displayName} ({player.UserIDString}).");
+            DebugLog($"Tournament started successfully by {player.displayName} ({player.UserIDString}).");
         }
 
         private void StartTournament()
-        {
-            Puts("[Debug] StartTournament invoked.");
-            
-            participants.Clear();
-            npcKillCounts.Clear();
-            animalKillCounts.Clear();
+		{
+			DebugLog("StartTournament invoked.");
+			
+			participants.Clear();
+			npcKillCounts.Clear();
+			animalKillCounts.Clear();
 
-            foreach (var id in participantsData.Keys)
-                participants.Add(id);
-            Puts("[Debug] Participants HashSet rebuilt for new tournament.");
+			foreach (var id in participantsData.Keys)
+				participants.Add(id);
+			DebugLog("Participants HashSet rebuilt for new tournament.");
 
-            foreach (var p in participantsData.Values)
-                p.Score = 0;
-            SaveParticipantsData();
-            Puts("[Debug] All participant scores reset to 0 and saved.");
+			foreach (var p in participantsData.Values)
+				p.Score = 0;
+			SaveParticipantsData();
+			DebugLog("All participant scores reset to 0 and saved.");
 
-            StartTournamentFile();
+			StartTournamentFile();
 
-            try
-            {
-                Puts($"[Debug] Current state: isTournamentRunning={isTournamentRunning}, tournamentEndTime={tournamentEndTime:yyyy-MM-dd HH:mm:ss} UTC.");
+			try
+			{
+				DebugLog($"Current state: isTournamentRunning={isTournamentRunning}, tournamentEndTime={tournamentEndTime:yyyy-MM-dd HH:mm:ss} UTC.");
 
-                if (isTournamentRunning)
-                {
-                    Puts("[Debug] Attempted to start tournament, but one is already running.");
-                    return;
-                }
+				if (isTournamentRunning)
+				{
+					Puts("[Debug] Attempted to start tournament, but one is already running.");
+					return;
+				}
 
-                if (Configuration.DurationHours <= 0.0167)
-                {
-                    PrintError("[Error] Invalid tournament duration. Ensure `DurationHours` > 0.");
-                    return;
-                }
+				if (Configuration.DurationHours <= 0.0167)
+				{
+					PrintError("[Error] Invalid tournament duration. Ensure `DurationHours` > 0.");
+					return;
+				}
 
-                isTournamentRunning = true;
-                tournamentEndTime = DateTime.UtcNow.AddHours(Configuration.DurationHours);
-                Puts($"[Info] Tournament started. Duration: {Configuration.DurationHours} hours. Ends at: {tournamentEndTime:yyyy-MM-dd HH:mm:ss} UTC.");
+				isTournamentRunning = true;
+				tournamentStartTime = DateTime.UtcNow;
+				tournamentEndTime = tournamentStartTime.AddHours(Configuration.DurationHours);
+				LogInfo($"Tournament started. Duration: {Configuration.DurationHours} hours. Ends at: {tournamentEndTime:yyyy-MM-dd HH:mm:ss} UTC.");
 
-                playerStats.Clear();
+				playerStats.Clear();
 
-                if (countdownTimer != null)
-                {
-                    Puts("[Debug] Destroying existing countdown timer.");
-                    countdownTimer.Destroy();
-                    countdownTimer = null;
-                }
+				if (countdownTimer != null)
+				{
+					DebugLog("Destroying existing countdown timer.");
+					countdownTimer.Destroy();
+					countdownTimer = null;
+				}
 
-                if (participantsData.Values.Any())
-                    LogEvent($"[Info] Participants at tournament start: {string.Join(", ", participantsData.Values.Select(p => p.Name))}");
-                else
-                    LogEvent("[Info] No participants at tournament start.");
+				if (participantsData.Values.Any())
+					LogEvent($"[Info] Participants at tournament start: {string.Join(", ", participantsData.Values.Select(p => p.Name))}");
+				else
+					LogEvent("[Info] No participants at tournament start.");
 
-                LogEvent("[Info] Tournament started successfully.");
+				LogEvent("[Info] Tournament started successfully.");
 
-                ScheduleTournamentEnd();
+				ScheduleTournamentEnd();
 
-                var startTokens = new Dictionary<string,string> {
-                    { "TimeRemaining", FormatTimeRemaining(tournamentEndTime - DateTime.UtcNow) },
-                    { "Duration",       Configuration.DurationHours.ToString()         }
-                };
-                BroadcastLocalized("StartTournament", startTokens);
-                if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-                {
-                    SendDiscordMessage(
-                        Lang("StartTournament", null, startTokens, Configuration.DefaultLanguage)
-                    );
-                }
-            }
-            catch (Exception ex)
-            {
-                PrintError($"[Error] Failed to start tournament: {ex.Message}");
-            }
-            
-        }
+				var startTokens = new Dictionary<string,string> {
+					{ "TimeRemaining", FormatTimeRemaining(tournamentEndTime - DateTime.UtcNow) },
+					{ "Duration",       Configuration.DurationHours.ToString()         }
+				};
+				BroadcastLocalized("StartTournament", startTokens);
+				if (!string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
+				{
+					SendDiscordMessage(
+						Lang("StartTournament", null, startTokens, Configuration.DefaultLanguage)
+					);
+				}
+			}
+			catch (Exception ex)
+			{
+				PrintError($"[Error] Failed to start tournament: {ex.Message}");
+			}
+			
+		}
         
         private string GetGroupKey(ulong userId)
         {
@@ -1960,7 +1981,7 @@ namespace Oxide.Plugins
 
         private void EndTournament()
         {
-            Puts("[Debug] EndTournament invoked.");
+            DebugLog("EndTournament invoked.");
 
             try
             {
@@ -1971,7 +1992,7 @@ namespace Oxide.Plugins
                 }
 
                 isTournamentRunning = false;
-                Puts("RustRoyale: Tournament ended!");
+                LogInfo("Tournament ended!");
 
                 var sortedParticipants = participantsData.Values
                     .OrderByDescending(p => p.Score)
@@ -2063,12 +2084,12 @@ namespace Oxide.Plugins
                     SendDiscordMessage(globalMessage.ToString());
                 }
 
-                Puts($"[Debug] Notifications sent for tournament end:\n{globalMessage}");
-                Puts($"[Debug] Tournament successfully ended. Total participants: {sortedParticipants.Count}");
+                DebugLog($"Notifications sent for tournament end:\n{globalMessage}");
+                DebugLog($"Tournament successfully ended. Total participants: {sortedParticipants.Count}");
 
                 countdownTimer?.Destroy();
                 countdownTimer = null;
-                Puts("[Debug] Scheduling the next tournament.");
+                DebugLog("Scheduling the next tournament.");
                 ScheduleTournament();
             }
             catch (Exception ex)
@@ -2160,7 +2181,7 @@ namespace Oxide.Plugins
 
                 if (Configuration.ShowWelcomeUI && !welcomeOptOut.Contains(player.userID))
                 {
-                    Puts($"[Debug] Showing welcome UI for {player.displayName} ({player.UserIDString})");
+                    DebugLog($"Showing welcome UI for {player.displayName} ({player.UserIDString})");
                     ShowWelcomeUI(player);
                 }
             });
@@ -2179,6 +2200,12 @@ namespace Oxide.Plugins
         private readonly Dictionary<ulong, (BasePlayer Attacker, float TimeStamp)> lastDamageRecords = new Dictionary<ulong, (BasePlayer, float)>();
         private readonly Dictionary<ulong, BasePlayer> lastEntityDamageRecords = new Dictionary<ulong, BasePlayer>();
         private readonly Dictionary<ulong, (string Prefab, float TimeStamp)> lastNpcOrHeliDamage = new Dictionary<ulong, (string Prefab, float)>();
+
+        private readonly Dictionary<ulong, float> _lastHeliDamageLogTimeByVictim = new Dictionary<ulong, float>();
+        private readonly Dictionary<string, float> _lastNoHandlerLogTimeByPrefab = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        private const float DebugHeliDamageLogCooldownSeconds = 5f;   // per victim
+        private const float DebugNoHandlerLogCooldownSeconds = 30f;   // per prefab
+
         private const float HeliAttributionWindow = 8f;
         private const int RecentDeathWindowSeconds = 5;
 
@@ -2228,9 +2255,17 @@ namespace Oxide.Plugins
                 var anyPrefab = GetAnyInitiatorPrefab(info);
                 if (IsHeliPrefab(anyPrefab))
                 {
-                    lastNpcOrHeliDamage[victim.userID] = (anyPrefab, UnityEngine.Time.realtimeSinceStartup);
-                    Puts($"[Debug] Noted heli damage to {victim.displayName} by '{anyPrefab}' at t={UnityEngine.Time.realtimeSinceStartup:0.00}");
+                    var now = UnityEngine.Time.realtimeSinceStartup;
+                    lastNpcOrHeliDamage[victim.userID] = (anyPrefab, now);
+
+                    if (!_lastHeliDamageLogTimeByVictim.TryGetValue(victim.userID, out var lastLog) ||
+                        now - lastLog >= DebugHeliDamageLogCooldownSeconds)
+                    {
+                        _lastHeliDamageLogTimeByVictim[victim.userID] = now;
+                        DebugLog($"Noted heli damage to {victim.displayName} by '{anyPrefab}' at t={now:0.00}");
+                    }
                 }
+
             }
 
             if (entity?.net != null)
@@ -2397,9 +2432,9 @@ namespace Oxide.Plugins
                 lower.StartsWith(animal + ".") ||
                 lower.StartsWith(animal + "_") ||
                 lower.StartsWith(animal + "2"));
-            if (!match)
-                Puts($"[Debug] Skipped prefab '{lower}' in IsAnimalKill()");
+
             return match;
+
         }
 
         private void OnPlayerDeath(BasePlayer victim, HitInfo info)
@@ -2418,8 +2453,19 @@ namespace Oxide.Plugins
             if (HandleNpcKilledByTrap(victim, entity, info))        return;
             if (HandleNpcOrUnownedEntityKill(victim, attacker, entity, info)) return;
             if (TryScoreHeliFallback(victim, info))                 return;
-            Puts($"[Debug] ❌ No handler matched for {victim.displayName}'s death. Entity: {entity?.ShortPrefabName ?? "unknown"}");
+
+            var prefabKey = entity?.ShortPrefabName ?? "unknown";
+            var now = UnityEngine.Time.realtimeSinceStartup;
+
+            if (!_lastNoHandlerLogTimeByPrefab.TryGetValue(prefabKey, out var lastLog) ||
+                now - lastLog >= DebugNoHandlerLogCooldownSeconds)
+            {
+                _lastNoHandlerLogTimeByPrefab[prefabKey] = now;
+                DebugLog($"❌ No handler matched for {victim.displayName}'s death. Entity: {prefabKey}");
+            }
+
             lastDamageRecords.Remove(victim.userID);
+
         }
 
         private bool IsRecentDeath(BasePlayer victim)
@@ -2427,7 +2473,7 @@ namespace Oxide.Plugins
             if (recentDeaths.TryGetValue(victim.userID, out var lastDeathTime) &&
                 (DateTime.UtcNow - lastDeathTime).TotalSeconds < RecentDeathWindowSeconds)
             {
-                Puts($"[Debug] Ignoring duplicate death event for {victim.displayName}. Last death: {lastDeathTime}.");
+                DebugLog($"Ignoring duplicate death event for {victim.displayName}. Last death: {lastDeathTime}.");
                 return true;
             }
             recentDeaths[victim.userID] = DateTime.UtcNow;
@@ -2442,7 +2488,7 @@ namespace Oxide.Plugins
                 && UnityEngine.Time.realtimeSinceStartup - record.TimeStamp <= 30f)
             {
                 attacker = record.Attacker;
-                Puts($"[Debug] Overriding final attacker with last real attacker: {attacker?.displayName}");
+                DebugLog($"Overriding final attacker with last real attacker: {attacker?.displayName}");
             }
             return attacker;
         }
@@ -2719,7 +2765,7 @@ namespace Oxide.Plugins
             if (!IsAnimalKill(entity.ShortPrefabName) && !entity.ShortPrefabName.Contains("scientist"))
                 return;
 
-            Puts($"[Debug] ❌ No OnEntityDeath handler matched for entity: {entity.ShortPrefabName}");
+            DebugLog($"No OnEntityDeath handler matched for entity: {entity.ShortPrefabName}");
         }
 
         private bool HandleDeathByBradleyOrHelicopter(BaseCombatEntity entity, HitInfo info)
@@ -2887,11 +2933,13 @@ namespace Oxide.Plugins
 
                         if (restOfPayload.Contains("eliminating "))
                         {
-                            npcKillCounts[attackerId] = npcKillCounts.GetValueOrDefault(attackerId) + 1;
+                            npcKillCounts.TryGetValue(attackerId, out var curNpc);
+                            npcKillCounts[attackerId] = curNpc + 1;
                         }
                         else if (restOfPayload.Contains("killing a "))
                         {
-                            animalKillCounts[attackerId] = animalKillCounts.GetValueOrDefault(attackerId) + 1;
+                            animalKillCounts.TryGetValue(attackerId, out var curAnimal);
+                            animalKillCounts[attackerId] = curAnimal + 1;
                         }
                     }
 
@@ -2933,33 +2981,6 @@ namespace Oxide.Plugins
                 return participantFromData.Name;
             }
 
-            try
-            {
-                if (File.Exists(ParticipantsFile))
-                {
-                    var participantsFromFile = JsonConvert.DeserializeObject<Dictionary<ulong, PlayerStats>>(File.ReadAllText(ParticipantsFile));
-                    if (participantsFromFile != null && participantsFromFile.TryGetValue(userId, out var participantFromFile))
-                    {
-                        if (!string.IsNullOrEmpty(participantFromFile.Name) && participantFromFile.Name != "Unknown")
-                        {
-                            playerNameCache[userId] = participantFromFile.Name;
-
-                            if (participantsData.TryGetValue(userId, out var participant) && participant.Name == "Unknown")
-                            {
-                                participant.Name = participantFromFile.Name;
-                                SaveParticipantsData();
-                            }
-
-                            return participantFromFile.Name;
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                PrintWarning($"Failed to retrieve player name from Participants.json: {ex.Message}");
-            }
-
             return "Unknown";
         }
 
@@ -2993,7 +3014,7 @@ namespace Oxide.Plugins
                         participants.Add(userId);
                     }
 
-                    Puts($"[Debug] Loaded participants: {string.Join(", ", participants)}");
+                    DebugLog($"Loaded {participants.Count} participants");
                 }
                 else
                 {
@@ -3042,7 +3063,7 @@ namespace Oxide.Plugins
                     serializedData = SerializeParticipantsData(participantsData);
                 }
 
-                Puts($"[Debug] Preparing to save Participants.json. Data:\n{serializedData}");
+                DebugLog($"Preparing to save Participants.json ({participantsData.Count} participants)");
 
                 if (File.Exists(ParticipantsFile))
                 {
@@ -3083,8 +3104,7 @@ namespace Oxide.Plugins
                     }
                 }
 
-                string savedData = File.ReadAllText(ParticipantsFile);
-                Puts($"[Debug] Successfully saved Participants.json. Contents:\n{savedData}");
+                DebugLog("Successfully saved Participants.json");
             }
             catch (IOException ioEx)
             {
@@ -3115,11 +3135,11 @@ namespace Oxide.Plugins
 
         private void UpdatePlayerScore(ulong userId, string actionCode, string actionDescription, BasePlayer victim = null, HitInfo info = null, string attackerName = null, string entityName = "Unknown", bool reverseMessage = false, float? distance = null, string rawEntityType = null, string rawEntityPrefab = null)
         {
-            Puts($"[Debug] UpdatePlayerScore called for UserID={userId}, ActionCode={actionCode}, Victim={victim?.displayName ?? "None"}, Entity={entityName}");
+            DebugLog($"UpdatePlayerScore: UserID={userId}, Code={actionCode}, Victim={victim?.displayName ?? "None"}, Entity={entityName}");
 
             if (inactiveParticipants.Contains(userId))
             {
-                Puts($"[Debug] Skipping score update: {userId} is inactive.");
+                DebugLog($"Skipping score update: {userId} inactive");
                 return;
             }
 
@@ -3142,12 +3162,12 @@ namespace Oxide.Plugins
                 participant.Score += points;
             }
 
-            Puts($"[Debug] {participant.Name} (UserID: {userId}) | Previous Score: {previousScore} | Gained: {points} | New Score: {participant.Score}");
+            DebugLog($"{participant.Name} ({userId}) score {previousScore} -> {participant.Score} (+{points})");
 
             SaveParticipantsData();
 
-            string savedData = File.ReadAllText(ParticipantsFile);
-            Puts($"[Debug] Participants.json after save: {savedData}");
+            if (Configuration?.EnableDebugLogs == true)
+                DebugLog($"Participants.json saved after score update for {userId}");
 
             string pluralS = Math.Abs(points) == 1 ? "" : "s";
 
@@ -3475,7 +3495,7 @@ namespace Oxide.Plugins
                 return;
             }
 
-            Puts($"[Debug] Sending tournament message: {message}");
+            DebugLog($"Sending tournament message: {message}");
 
             try
             {
@@ -3514,15 +3534,17 @@ namespace Oxide.Plugins
             }
         }
 
-        private void LogMessage(string message, bool logToDiscord = false)
+        private void LogMessage(string message, bool logToDiscord = false, bool isDebug = false)
         {
-            Puts(message);
+            if (isDebug)
+                DebugLog(message);
+            else
+                LogInfo(message);
 
-            if (logToDiscord && !string.IsNullOrEmpty(Configuration.DiscordWebhookUrl))
-            {
+            if (logToDiscord && !string.IsNullOrEmpty(Configuration?.DiscordWebhookUrl))
                 SendDiscordMessage(message);
-            }
         }
+
     #endregion
     #region Kit Economy Integration
     [PluginReference]
